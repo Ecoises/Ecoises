@@ -25,7 +25,6 @@ return new class extends Migration
             $table->string('identification_status') ;
             $table->enum('confidence_level', ['baja', 'media', 'alta'])->nullable();
             $table->decimal('quality_score', 3, 2)->default(0.0);
-            $table->integer('points_awarded')->default(0);
             $table->boolean('is_featured')->default(false);
             $table->boolean('is_public')->default(true);
             $table->boolean('is_research_grade')->default(false);
@@ -36,6 +35,8 @@ return new class extends Migration
             $table->index(['latitude', 'longitude']);
             $table->index('observed_at');
             $table->index('identification_status');
+
+            
         });
     }
 

@@ -19,6 +19,7 @@ class Observation extends Model
     protected $fillable = [
         'user_id',
         'taxon_id',
+        'location_id',
         'latitude',
         'longitude',
         'location_accuracy',
