@@ -341,7 +341,7 @@ class ExternalApisService
     {
         $url = $config->base_url . '/species/id/' . $externalId;
         $params = [
-            'token' => $config->api_key
+            'token' => env('IUCN_API_TOKEN')
         ];
 
         $response = Http::get($url, $params);
