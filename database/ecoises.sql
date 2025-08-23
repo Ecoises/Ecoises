@@ -158,6 +158,22 @@ CREATE TABLE api_configurations (
 -- OBSERVACIONES DE USUARIOS
 -- ================================================
 
+CREATE TABLE locations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NULL,
+    latitude DECIMAL(10, 8) NOT NULL,
+    longitude DECIMAL(11, 8) NOT NULL,
+    radius_km DECIMAL(5, 2) NOT NULL DEFAULT 1.00,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Índices
+CREATE INDEX idx_locations_coordinates ON locations (latitude, longitude);
+CREATE INDEX idx_locations_is_active ON locations (is_active);
+
 CREATE TABLE observations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
@@ -186,7 +202,6 @@ CREATE TABLE observations (
     
     -- Gamificación y calidad
     quality_score DECIMAL(3, 2) DEFAULT 0.0, -- 0.0 a 5.0
-    points_awarded INT DEFAULT 0,
     is_featured BOOLEAN DEFAULT FALSE,
     
     -- Metadatos
@@ -196,7 +211,8 @@ CREATE TABLE observations (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (taxon_id) REFERENCES taxa(id) ON DELETE SET NULL
+    FOREIGN KEY (taxon_id) REFERENCES taxa(id) ON DELETE SET NULL,
+    FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE SET NULL
 );
 
 -- Tabla separada para múltiples fotos por observación
@@ -654,13 +670,14 @@ CREATE TABLE api_usage_stats (
 -- ================================================
 
 -- Observaciones y fotos
-CREATE INDEX idx_observations_user_id ON observations(user_id);
-CREATE INDEX idx_observations_taxon_id ON observations(taxon_id);
-CREATE INDEX idx_observations_location ON observations(latitude, longitude);
-CREATE INDEX idx_observations_date ON observations(observed_at);
-CREATE INDEX idx_observations_status ON observations(identification_status);
-CREATE INDEX idx_observation_photos_obs ON observation_photos(observation_id);
-CREATE INDEX idx_observation_photos_primary ON observation_photos(observation_id, is_primary);
+CREATE INDEX idx_observations_user_id ON observations (user_id);
+CREATE INDEX idx_observations_taxon_id ON observations (taxon_id);
+CREATE INDEX idx_observations_location_id ON observations (location_id);
+CREATE INDEX idx_observations_coordinates ON observations (latitude, longitude);
+CREATE INDEX idx_observations_is_public ON observations (is_public);
+CREATE INDEX idx_observations_observed_at ON observations (observed_at);
+CREATE INDEX idx_observations_identification_status ON observations (identification_status);
+CREATE INDEX idx_observations_is_research_grade ON observations (is_research_grade);
 
 -- API Cache unificado
 CREATE INDEX idx_unified_cache_key ON unified_api_cache(cache_key);

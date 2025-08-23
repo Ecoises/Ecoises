@@ -123,4 +123,6 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'campus_location_id' => env('DEFAULT_LOCATION_ID', 1),
+
 ];
