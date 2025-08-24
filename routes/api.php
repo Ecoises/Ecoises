@@ -6,12 +6,16 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Api\ObservationController;
 use App\Http\Controllers\Api\SpeciesController;
-use Laravel\Socialite\Facades\Socialite;
+
 
 // Rutas de autenticación
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/auth/google', [GoogleController::class, 'authenticate']);
+
+Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('reset-password', [AuthController::class, 'resetPassword']);
+
 
 // Rutas públicas
 Route::prefix('species')->group(function () {

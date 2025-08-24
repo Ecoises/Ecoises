@@ -125,4 +125,19 @@ return [
 
     'campus_location_id' => env('DEFAULT_LOCATION_ID', 1),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Frontend Application URL
+    |--------------------------------------------------------------------------
+    |
+    | URL de tu aplicación frontend React
+    |
+    */
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:8080'),
+
+   
+
+   
+
+
 ];
