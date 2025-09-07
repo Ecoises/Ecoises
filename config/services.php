@@ -40,5 +40,9 @@ return [
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
+    'inaturalist' => [
+    'base_url' => env('INATURALIST_BASE_URL', 'https://api.inaturalist.org/v1'),
+    'rate_limit' => (int) env('INATURALIST_RATE_LIMIT', 100),
+],
 
 ];

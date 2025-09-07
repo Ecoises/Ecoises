@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Api\ObservationController;
 use App\Http\Controllers\Api\SpeciesController;
+use App\Http\Controllers\Api\TaxonController;
 
 
 // Rutas de autenticación
@@ -27,6 +28,14 @@ Route::prefix('species')->group(function () {
 Route::prefix('observations')->group(function () {
     Route::get('/', [ObservationController::class, 'index']); // Listar observaciones con filtros
     Route::get('/public', [ObservationController::class, 'publicObservations']); // Observaciones públicas
+});
+
+// Rutas para la gestión de taxones
+Route::prefix('taxa')->group(function () {
+    Route::get('/search', [TaxonController::class, 'search']); // Buscar taxones
+    Route::get('/{id}', [TaxonController::class, 'show']); // Obtener un taxón por ID
+    Route::get('/{taxon}/observations', [TaxonController::class, 'observations']); // Obtener observaciones de un taxón
+    Route::post('/{taxon}/sync-observations', [TaxonController::class, 'syncObservations']); // Sincronizar observaciones de un taxón
 });
 
 // Rutas protegidas (requieren autenticación)

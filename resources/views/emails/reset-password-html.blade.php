@@ -26,37 +26,43 @@
             background-color: white;
             box-shadow: 0 10px 25px rgba(26, 46, 5, 0.1);
         }
-        .header {
-            background: linear-gradient(135deg, #84cc16 0%, #65a30d 100%);
-            padding: 40px 30px;
-            text-align: center;
-            border-radius: 12px 12px 0 0;
-        }
+        
         .logo-container {
             display: inline-flex;
             align-items: center;
             gap: 12px;
             margin-bottom: 16px;
         }
+        .header {
+        background: linear-gradient(135deg, #3f4e26 0%, #1a2e05 100%);
+        padding: 20px 20px; /* ⬅ Reducido */
+        text-align: center;
+        border-radius: 12px 12px 0 0;
+    }
         .logo {
-            width: 50px;
-            height: 50px;
-            background-color: #a3e635;
-            border-radius: 12px;
+            width: 40px;   /* ⬅ Más pequeño */
+            height: 40px;  /* ⬅ Más pequeño */
+            border-radius: 8px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
-            font-size: 24px;
-            color: #1a2e05;
+        }
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* tu icono PNG se ajusta */
+            border-radius: 8px;
         }
         .app-name {
-            font-family: 'Montserrat', sans-serif;
-            font-size: 32px;
-            font-weight: 700;
-            color: white;
-            margin: 0;
+            font-size: 24px;
+            color: #fff;  /* ⬅ Reducido */
         }
+        .custom-url {
+        color: #a3e635; /* verde lima */
+        text-decoration: underline;
+        font-weight: 600;
+        word-break: break-all; /* para que no se desborde si la URL es muy larga */
+    }
         .header-subtitle {
             color: #ecfccb;
             font-size: 16px;
@@ -118,7 +124,7 @@
             font-size: 14px;
         }
         .security-tips {
-            background-color: #f0fdf4;
+            background-color: #f7f7f7;
             border-left: 4px solid #84cc16;
             padding: 20px;
             margin: 25px 0;
@@ -207,10 +213,12 @@
         <!-- Header -->
         <div class="header">
             <div class="logo-container">
-                <div class="logo">E</div>
+                <img src="https://i.imgur.com/oVpuLgm.png" 
+                alt="Logo Ecoises" 
+                class="h-8 w-8" 
+                width="40" height="40" />
                 <h1 class="app-name">{{ $appName }}</h1>
             </div>
-            <p class="header-subtitle">Tu aventura en la naturaleza continúa aquí</p>
         </div>
 
         <!-- Content -->
@@ -234,13 +242,12 @@
 
             <!-- Expiry Warning -->
             <div class="expiry-">
-                <div class="expiry-warning-icon">⏰</div>
-                <p class="expiry-text">Este enlace expirará en {{ $count }} minutos por tu seguridad</p>
+                <p class="expiry-text">⏰ Este enlace expirará en {{ $count }} minutos por tu seguridad</p>
             </div>
 
             <!-- Security Tips -->
             <div class="security-tips">
-                <h3 class="security-title">🛡️ Consejos de seguridad</h3>
+                <h3 class="security-title">Consejos de seguridad</h3>
                 <ul class="security-list">
                     <li>Usa una contraseña única y fuerte</li>
                     <li>Incluye mayúsculas, minúsculas, números y símbolos</li>
@@ -254,11 +261,13 @@
             </p>
 
             <!-- URL Fallback -->
-            <div class="url-fallback">
+           <div class="url-fallback">
                 <strong>¿Problemas con el botón?</strong><br>
                 Copia y pega esta URL en tu navegador:<br>
-                {{ $url }}
+                <a href="{{ $url }}" class="custom-url">{{ $url }}</a>
             </div>
+
+
 
             <!-- Signature -->
             <div class="signature">
