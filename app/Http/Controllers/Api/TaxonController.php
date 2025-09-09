@@ -104,6 +104,13 @@ class TaxonController extends Controller
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
+    /**
+     * Obtiene observaciones de un taxón específico
+     *
+     * @param int $taxonId
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function observations($taxonId, Request $request)
     {
         $request->validate([
@@ -128,6 +135,49 @@ class TaxonController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Observaciones obtenidas correctamente',
+            'data' => $result['data'],
+            'meta' => [
+                'source' => $result['source'],
+                'cached' => $result['cached'] ?? false,
+                'pagination' => $result['pagination'] ?? null,
+            ],
+        ]);
+    }
+    
+    /**
+     * Lista especies observadas en un lugar específico
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function listSpeciesByPlace(Request $request)
+    {
+        $request->validate([
+            'per_page' => 'sometimes|integer|min:1|max:100',
+            'page' => 'sometimes|integer|min:1',
+            'order_by' => 'sometimes|string|in:created_at,observed_on,species_guess',
+            'order' => 'sometimes|string|in:asc,desc',
+        ]);
+        
+        $params = $request->only(['per_page', 'page', 'order_by', 'order']);
+        
+        // Forzamos el place_id=12731 como solicitado
+        $params['place_id'] = '12731';
+        
+        // Obtenemos las observaciones del lugar
+        $result = $this->taxonService->getPlaceObservations($params);
+        
+        if (!$result['success']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['error']['message'] ?? 'Error al obtener las especies del lugar',
+                'data' => null,
+            ], 500);
+        }
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Especies obtenidas correctamente',
             'data' => $result['data'],
             'meta' => [
                 'source' => $result['source'],

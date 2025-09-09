@@ -174,6 +174,13 @@ class TaxonService
      * @param array $params
      * @return array
      */
+    /**
+     * Obtiene observaciones de un taxón específico
+     *
+     * @param int $taxonId
+     * @param array $params
+     * @return array
+     */
     public function getTaxonObservations(int $taxonId, array $params = []): array
     {
         // Primero obtenemos el taxón para asegurarnos de que existe
@@ -203,6 +210,132 @@ class TaxonService
             'pagination' => $apiResult['pagination'] ?? [],
             'cached' => $apiResult['cached'] ?? false,
             'source' => 'api',
+        ];
+    }
+    
+    /**
+     * Obtiene las especies observadas en un lugar específico
+     *
+     * @param array $params
+     * @return array
+     */
+    public function getPlaceObservations(array $params = []): array
+    {
+        // Asegurarnos de que el place_id esté presente
+        if (empty($params['place_id'])) {
+            return [
+                'success' => false,
+                'error' => ['message' => 'Se requiere un place_id para buscar observaciones por lugar'],
+                'source' => 'local',
+            ];
+        }
+        
+        // Configurar parámetros para la búsqueda de observaciones
+        $defaultParams = [
+            'per_page' => $params['per_page'] ?? 30,
+            'page' => $params['page'] ?? 1,
+            'order_by' => $params['order_by'] ?? 'created_at',
+            'order' => $params['order'] ?? 'desc',
+            'quality_grade' => 'research,needs_id',
+            'photos' => 'true',
+            'identifications' => 'most_agree',
+            'place_id' => $params['place_id'],
+            'taxon_geoprivacy' => 'open', // Solo observaciones con ubicación abierta
+        ];
+        
+        // Limpiar parámetros vacíos
+        $apiParams = array_filter($defaultParams, function($value) {
+            return $value !== null && $value !== '';
+        });
+        
+        try {
+            // Usar el método getObservations del servicio iNaturalist
+            $apiResult = $this->iNaturalistService->getObservations($apiParams);
+            
+            if (!$apiResult['success']) {
+                Log::error('Error al obtener observaciones del lugar', [
+                    'params' => $apiParams,
+                    'error' => $apiResult['error'] ?? 'Error desconocido'
+                ]);
+                
+                return [
+                    'success' => false,
+                    'error' => $apiResult['error'] ?? ['message' => 'Error al obtener las observaciones del lugar'],
+                    'source' => 'api',
+                ];
+            }
+            
+            // Procesar los resultados para extraer las especies únicas
+            $observations = $apiResult['data'] ?? [];
+            $uniqueTaxa = [];
+            $normalizedSpecies = [];
+            
+            foreach ($observations as $observation) {
+                if (isset($observation['taxon']['id']) && !isset($uniqueTaxa[$observation['taxon']['id']])) {
+                    $uniqueTaxa[$observation['taxon']['id']] = true;
+                    $normalizedSpecies[] = $this->normalizeTaxonData($observation['taxon']);
+                }
+            }
+            
+            return [
+                'success' => true,
+                'data' => $normalizedSpecies,
+                'pagination' => [
+                    'total' => $apiResult['total'] ?? count($normalizedSpecies),
+                    'per_page' => $apiResult['per_page'] ?? count($normalizedSpecies),
+                    'current_page' => $apiResult['page'] ?? 1,
+                    'last_page' => $apiResult['total_pages'] ?? 1,
+                ],
+                'cached' => $apiResult['cached'] ?? false,
+                'source' => 'api',
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error('Excepción al obtener observaciones: ' . $e->getMessage(), [
+                'params' => $apiParams,
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return [
+                'success' => false,
+                'error' => ['message' => 'Error al procesar la respuesta de la API: ' . $e->getMessage()],
+                'source' => 'api',
+            ];
+        }
+    }
+    
+    /**
+     * Normaliza los datos de un taxón para una respuesta consistente
+     *
+     * @param array $taxonData
+     * @return array
+     */
+    protected function normalizeTaxonData(array $taxonData): array
+    {
+        return [
+            'id' => $taxonData['id'] ?? null,
+            'scientific_name' => $taxonData['name'] ?? null,
+            'common_name' => $taxonData['preferred_common_name'] ?? 
+                           ($taxonData['english_common_name'] ?? 
+                           ($taxonData['spanish_common_name'] ?? null)),
+            'rank' => $taxonData['rank'] ?? null,
+            'rank_level' => $taxonData['rank_level'] ?? null,
+            'extinct' => $taxonData['extinct'] ?? false,
+            'wikipedia_url' => $taxonData['wikipedia_url'] ?? null,
+            'wikipedia_summary' => $taxonData['wikipedia_summary'] ?? null,
+            'default_photo' => [
+                'url' => $taxonData['default_photo']['url'] ?? null,
+                'attribution' => $taxonData['default_photo']['attribution'] ?? null,
+                'license_code' => $taxonData['default_photo']['license_code'] ?? null,
+            ] ?? null,
+            'ancestry' => $taxonData['ancestry'] ?? null,
+            'conservation_status' => $taxonData['conservation_status'] ?? null,
+            'taxon_schemes_count' => $taxonData['taxon_schemes_count'] ?? 0,
+            'observations_count' => $taxonData['observations_count'] ?? 0,
+            'taxon_changes_count' => $taxonData['taxon_changes_count'] ?? 0,
+            'is_active' => $taxonData['is_active'] ?? true,
+            'created_at' => $taxonData['created_at'] ?? now()->toDateTimeString(),
+            'updated_at' => $taxonData['updated_at'] ?? now()->toDateTimeString(),
         ];
     }
     

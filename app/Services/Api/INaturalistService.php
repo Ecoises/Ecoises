@@ -4,6 +4,7 @@ namespace App\Services\Api;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class INaturalistService extends BaseApiService
 {
@@ -164,14 +165,25 @@ class INaturalistService extends BaseApiService
      */
     public function getTaxonObservations(string $taxonId, array $params = []): array
     {
-        $defaultParams = [
-            'taxon_id' => $taxonId,
-            'per_page' => $params['per_page'] ?? 12,
-            'order_by' => 'votes',
-            'order' => 'desc',
-            'quality_grade' => 'research',
-            'photos' => 'true',
-        ];
+        // Combinar parámetros por defecto con los proporcionados
+        $defaultParams = array_merge(
+            $this->getDefaultParams(),
+            [
+                'taxon_id' => $taxonId,
+                'place_id' => '12731', // ID fijo del lugar
+                'per_page' => $params['per_page'] ?? 100, // Aumentamos el límite por defecto
+                'order_by' => $params['order_by'] ?? 'created_at', // Ordenar por fecha de creación
+                'order' => $params['order'] ?? 'desc',
+                'quality_grade' => 'research,needs_id', // Incluir observaciones validadas y que necesitan ID
+                'photos' => 'true',
+                'identifications' => 'most_agree', // Solo las identificaciones más acordadas
+            ]
+        );
+        
+        // Eliminar parámetros vacíos o nulos
+        $defaultParams = array_filter($defaultParams, function($value) {
+            return $value !== null && $value !== '';
+        });
         
         // Combinar con parámetros proporcionados (los predeterminados tienen prioridad)
         $params = array_merge($params, $defaultParams);
@@ -239,6 +251,89 @@ class INaturalistService extends BaseApiService
             'cached' => $response['cached'] ?? false,
             'api' => $this->apiName,
         ];
+    }
+    
+    /**
+     * Obtiene observaciones de iNaturalist con filtros personalizables
+     *
+     * @param array $params Parámetros de búsqueda
+     * @return array
+     */
+    public function getObservations(array $params = []): array
+    {
+        try {
+            // Combinar con parámetros por defecto
+            $defaultParams = array_merge(
+                [
+                    'per_page' => 30,
+                    'page' => 1,
+                    'order_by' => 'created_at',
+                    'order' => 'desc',
+                    'quality_grade' => 'research,needs_id',
+                    'photos' => 'true',
+                    'identifications' => 'most_agree',
+                    'taxon_geoprivacy' => 'open',
+                ],
+                $params
+            );
+            
+            // Limpiar parámetros vacíos
+            $params = array_filter($defaultParams, function($value) {
+                return $value !== null && $value !== '';
+            });
+            
+            // Asegurarse de que los parámetros estén limpios
+            $params = $this->cleanParams($params);
+            
+            // Realizar la petición a la API de iNaturalist
+            $response = $this->makeRequest('get', '/v1/observations', $params, true);
+            
+            if (!$response['success']) {
+                Log::error('Error en la API de iNaturalist', [
+                    'params' => $params,
+                    'error' => $response['error'] ?? 'Error desconocido'
+                ]);
+                
+                return [
+                    'success' => false,
+                    'error' => $response['error'] ?? ['message' => 'Error al obtener observaciones de iNaturalist'],
+                    'api' => $this->apiName,
+                ];
+            }
+            
+            // Procesar y normalizar las observaciones
+            $observations = $response['data']['results'] ?? [];
+            $normalizedObservations = [];
+            
+            foreach ($observations as $observation) {
+                if (isset($observation['taxon'])) {
+                    $normalizedObservations[] = $this->normalizeObservationData($observation);
+                }
+            }
+            
+            return [
+                'success' => true,
+                'data' => $normalizedObservations,
+                'total' => $response['data']['total_results'] ?? count($normalizedObservations),
+                'per_page' => $response['data']['per_page'] ?? $params['per_page'],
+                'page' => $response['data']['page'] ?? $params['page'],
+                'total_pages' => $response['data']['total_pages'] ?? 1,
+                'cached' => $response['cached'] ?? false,
+                'api' => $this->apiName,
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error('Excepción en getObservations: ' . $e->getMessage(), [
+                'params' => $params ?? [],
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return [
+                'success' => false,
+                'error' => ['message' => 'Error al procesar la respuesta de iNaturalist: ' . $e->getMessage()],
+                'api' => $this->apiName,
+            ];
+        }
     }
     
     /**
@@ -492,5 +587,71 @@ class INaturalistService extends BaseApiService
         // Dividir por comas y tomar el primer elemento (generalmente el nombre del lugar)
         $parts = explode(',', $placeString);
         return trim($parts[0]);
+    }
+    
+    /**
+     * Realiza una petición a la API de iNaturalist
+     *
+     * @param string $method
+     * @param string $endpoint
+     * @param array $params
+     * @param bool $cache
+     * @return array
+     */
+    protected function makeRequest(string $method, string $endpoint, array $params = [], bool $cache = true): array
+    {
+        try {
+            $client = new \GuzzleHttp\Client([
+                'base_uri' => $this->config['base_url'],
+                'timeout' => $this->config['timeout'] ?? 30,
+                'verify' => false, // Solo para desarrollo, en producción debería ser true
+            ]);
+            
+            $options = [
+                'query' => strtolower($method) === 'get' ? $params : [],
+                'form_params' => strtolower($method) === 'post' ? $params : [],
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json',
+                ],
+            ];
+            
+            // Agregar autenticación si está configurada
+            if (!empty($this->config['api_key'] ?? null)) {
+                $options['headers']['Authorization'] = 'Bearer ' . $this->config['api_key'];
+            }
+            
+            $response = $client->request(strtoupper($method), ltrim($endpoint, '/'), $options);
+            
+            $statusCode = $response->getStatusCode();
+            $body = json_decode((string) $response->getBody(), true);
+            
+            if ($statusCode >= 200 && $statusCode < 300) {
+                return [
+                    'success' => true,
+                    'data' => $body,
+                    'cached' => false,
+                ];
+            }
+            
+            return [
+                'success' => false,
+                'error' => [
+                    'message' => $body['error'] ?? 'Error en la petición a la API de iNaturalist',
+                    'code' => $statusCode,
+                ],
+                'cached' => false,
+            ];
+            
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'error' => [
+                    'message' => $e->getMessage(),
+                    'code' => $e->getCode(),
+                ],
+                'cached' => false,
+            ];
+        }
     }
 }
