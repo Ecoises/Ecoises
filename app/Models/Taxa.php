@@ -31,7 +31,6 @@ class Taxa extends Model
         'is_native',
         'is_endemic',
         'observation_count',
-        'identification_count',
         'last_observed_at',
     ];
     
@@ -61,5 +60,33 @@ class Taxa extends Model
     public function identifications(): HasMany
     {
         return $this->hasMany(Identification::class, 'taxon_id');
+    }
+
+    /**
+     * Accessor para datos enriquecidos (une essentials + API)
+     */
+    public function getEnrichedDataAttribute(): array
+    {
+        $enriched = $this->toArray();  // Datos locales de taxa
+
+        // FIX: Maneja si es Collection (toma el primero) o single model
+        $ref = $this->apiReferences;
+        if ($ref instanceof \Illuminate\Database\Eloquent\Collection) {
+            $ref = $ref->first();  // Toma la primaria o primera
+        }
+
+        if ($ref && $ref->data) {
+            // Merge selectivo
+            $apiData = $ref->data;  // Array por cast
+            $enriched = array_merge($enriched, [
+                'rank' => $apiData['rank'] ?? null,
+                'wikipedia_url' => $apiData['wikipedia_url'] ?? null,
+                'default_photo' => $apiData['default_photo'] ?? null,
+                'observations_count_api' => $apiData['observations_count'] ?? 0,
+                'ancestry_full' => $apiData['ancestry'] ?? null,
+            ]);
+        }
+
+        return $enriched;
     }
 }

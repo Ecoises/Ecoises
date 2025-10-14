@@ -58,42 +58,43 @@ class INaturalistService extends BaseApiService
      * @return array
      */
     public function getTaxonById(string $id): array
-    {
-        $response = $this->makeRequest('get', "taxa/{$id}", $this->getDefaultParams());
-        
-        if (!$response['success']) {
-            return $response;
-        }
-        
-        // Procesar la respuesta para normalizarla
-        $taxonData = $response['data'] ?? null;
-        
-        // Si no hay datos o no es un array, devolver error
-        if (!is_array($taxonData)) {
-            return [
-                'success' => false,
-                'error' => ['message' => 'Formato de respuesta inesperado de la API'],
-                'api' => $this->apiName,
-            ];
-        }
-        
-        if (!$taxonData) {
-            return [
-                'success' => false,
-                'error' => ['message' => 'Taxón no encontrado'],
-                'api' => $this->apiName,
-            ];
-        }
-        
-        $normalizedTaxon = $this->normalizeTaxonData($taxonData);
-        
+{
+    // ✅ CORREGIDO: Usar /v1/taxa en lugar de taxa
+    $response = $this->makeRequest('get', "/v1/taxa/{$id}", $this->getDefaultParams());
+    
+    if (!$response['success']) {
+        return $response;
+    }
+    
+    // Procesar la respuesta para normalizarla
+    $taxonData = $response['data']['results'][0] ?? null;
+    
+    // Si no hay datos o no es un array, devolver error
+    if (!is_array($taxonData)) {
         return [
-            'success' => true,
-            'data' => $normalizedTaxon,
-            'cached' => $response['cached'] ?? false,
+            'success' => false,
+            'error' => ['message' => 'Formato de respuesta inesperado de la API'],
             'api' => $this->apiName,
         ];
     }
+    
+    if (!$taxonData) {
+        return [
+            'success' => false,
+            'error' => ['message' => 'Taxón no encontrado'],
+            'api' => $this->apiName,
+        ];
+    }
+    
+    $normalizedTaxon = $this->normalizeTaxonData($taxonData);
+    
+    return [
+        'success' => true,
+        'data' => $normalizedTaxon,
+        'cached' => $response['cached'] ?? false,
+        'api' => $this->apiName,
+    ];
+}
     
     /**
      * Busca taxones por nombre científico o común
@@ -129,32 +130,78 @@ class INaturalistService extends BaseApiService
             return $value !== null && $value !== '';
         });
         
-        $response = $this->makeRequest('get', '/taxa', $params, true);
-        
-        if (!$response['success']) {
-            return $response;
-        }
-        
-        // Procesar y normalizar los resultados
-        $results = $response['data']['results'] ?? [];
-        $normalizedResults = [];
-        
-        foreach ($results as $result) {
-            $normalizedResults[] = $this->normalizeTaxonData($result);
-        }
-        
+        $response = $this->makeRequest('get', '/v1/taxa', $params, true);
+    
+    if (!$response['success']) {
+        return $response;
+    }
+    
+    // 🔍 DEBUG: Verificar estructura de la respuesta
+    $rawResults = $response['data']['results'] ?? [];
+    
+    // TEMPORAL: Devolver datos crudos para debug
+    if (empty($rawResults)) {
         return [
             'success' => true,
-            'data' => $normalizedResults,
+            'debug_message' => 'No hay resultados crudos',
+            'debug_raw_response' => $response['data'],
+            'data' => [],
             'pagination' => [
                 'page' => $response['data']['page'] ?? 1,
                 'per_page' => $response['data']['per_page'] ?? $this->config['per_page'],
-                'total' => $response['data']['total_results'] ?? count($normalizedResults),
+                'total' => $response['data']['total_results'] ?? 0,
             ],
-            'cached' => $response['cached'] ?? false,
-            'api' => $this->apiName,
         ];
     }
+    
+    Log::info('🔍 DEBUG searchTaxon - Estructura de datos', [
+        'query' => $query,
+        'total_results' => $response['data']['total_results'] ?? 0,
+        'results_count' => count($rawResults),
+        'first_result_keys' => !empty($rawResults) ? array_keys($rawResults[0]) : [],
+        'first_result_sample' => !empty($rawResults) ? array_slice($rawResults[0], 0, 5, true) : null
+    ]);
+    
+    // Procesar y normalizar los resultados
+    $results = $rawResults;
+    $normalizedResults = [];
+    
+    foreach ($results as $index => $result) {
+        try {
+            $normalized = $this->normalizeTaxonData($result);
+            
+            // 🔍 DEBUG: Ver si la normalización funciona
+            Log::info("🔄 Normalización resultado {$index}", [
+                'raw_keys' => array_keys($result),
+                'normalized_keys' => array_keys($normalized),
+                'scientific_name' => $normalized['scientific_name'] ?? 'NULL',
+                'has_photo' => !empty($normalized['default_photo'])
+            ]);
+            
+            $normalizedResults[] = $normalized;
+        } catch (\Exception $e) {
+            Log::error("💥 Error normalizando resultado {$index}", [
+                'error' => $e->getMessage(),
+                'result_keys' => array_keys($result)
+            ]);
+            // Continuar con el siguiente resultado
+            continue;
+        }
+    }
+    
+    return [
+        'success' => true,
+        'data' => $normalizedResults,
+        'debug_results_count' => count($normalizedResults), // TEMPORAL
+        'pagination' => [
+            'page' => $response['data']['page'] ?? 1,
+            'per_page' => $response['data']['per_page'] ?? $this->config['per_page'],
+            'total' => $response['data']['total_results'] ?? count($normalizedResults),
+        ],
+        'cached' => $response['cached'] ?? false,
+        'api' => $this->apiName,
+    ];
+}
     
     /**
      * Obtiene las observaciones de un taxón específico
@@ -191,7 +238,7 @@ class INaturalistService extends BaseApiService
         // Asegurarse de que los parámetros estén limpios
         $params = $this->cleanParams($params);
         
-        $response = $this->makeRequest('get', '/observations', $params, true);
+        $response = $this->makeRequest('get', '/v1/observations', $params, true);
         
         if (!$response['success']) {
             return $response;
@@ -336,6 +383,7 @@ class INaturalistService extends BaseApiService
         }
     }
     
+    
     /**
      * Obtiene información general sobre la API de iNaturalist
      *
@@ -353,46 +401,46 @@ class INaturalistService extends BaseApiService
     }
     
     /**
-     * Normaliza los datos de un taxón de la API de iNaturalist
-     *
-     * @param array $taxonData
-     * @return array
-     */
-    protected function normalizeTaxonData(array $taxonData): array
-    {
-        $commonName = $this->getCommonName($taxonData);
-        
-        return [
-            'id' => $taxonData['id'],
-            'scientific_name' => $taxonData['name'],
-            'common_name' => $commonName,
-            'rank' => $taxonData['rank'] ?? null,
-            'rank_level' => $taxonData['rank_level'] ?? null,
-            'ancestry' => $taxonData['ancestry'] ? explode('/', $taxonData['ancestry']) : [],
-            'is_active' => (bool)($taxonData['is_active'] ?? true),
-            'extinct' => (bool)($taxonData['extinct'] ?? false),
-            'threatened' => (bool)($taxonData['threatened'] ?? false),
-            'introduced' => (bool)($taxonData['introduced'] ?? false),
-            'native' => (bool)($taxonData['native'] ?? false),
-            'wikipedia_url' => $taxonData['wikipedia_url'] ?? null,
-            'wikipedia_summary' => $taxonData['wikipedia_summary'] ?? null,
-            'default_photo' => $this->extractPhotoData($taxonData['default_photo'] ?? null),
-            'conservation_status' => $this->extractConservationStatus($taxonData['conservation_status'] ?? null),
-            'taxon_schemes' => $taxonData['taxon_schemes'] ?? [],
-            'taxon_changes_count' => $taxonData['taxon_changes_count'] ?? 0,
-            'taxon_schemes_count' => $taxonData['taxon_schemes_count'] ?? 0,
-            'observations_count' => $taxonData['observations_count'] ?? 0,
-            'universal_search_rank' => $taxonData['universal_search_rank'] ?? null,
-            'iconic_taxon_id' => $taxonData['iconic_taxon_id'] ?? null,
-            'iconic_taxon_name' => $taxonData['iconic_taxon_name'] ?? null,
-            'preferred_common_name' => $taxonData['preferred_common_name'] ?? null,
-            'ancestors' => $this->extractAncestors($taxonData['ancestors'] ?? []),
-            'taxon_photos' => $this->extractTaxonPhotos($taxonData['taxon_photos'] ?? []),
-            'created_at' => $taxonData['created_at'] ?? null,
-            'updated_at' => $taxonData['updated_at'] ?? null,
-            'source' => 'inaturalist',
-        ];
-    }
+ * Normaliza los datos de un taxón de la API de iNaturalist
+ *
+ * @param array $taxonData
+ * @return array
+ */
+protected function normalizeTaxonData(array $taxonData): array
+{
+    $commonName = $this->getCommonName($taxonData);
+    
+    return [
+        'id' => $taxonData['id'] ?? null,
+        'scientific_name' => $taxonData['name'] ?? $taxonData['scientific_name'] ?? 'Sin nombre científico',
+        'common_name' => $commonName,
+        'rank' => $taxonData['rank'] ?? null,
+        'rank_level' => $taxonData['rank_level'] ?? null,
+        'ancestry' => isset($taxonData['ancestry']) ? explode('/', $taxonData['ancestry']) : [],
+        'is_active' => (bool)($taxonData['is_active'] ?? true),
+        'extinct' => (bool)($taxonData['extinct'] ?? false),
+        'threatened' => (bool)($taxonData['threatened'] ?? false),
+        'introduced' => (bool)($taxonData['introduced'] ?? false),
+        'native' => (bool)($taxonData['native'] ?? false),
+        'wikipedia_url' => $taxonData['wikipedia_url'] ?? null,
+        'wikipedia_summary' => $taxonData['wikipedia_summary'] ?? null,
+        'default_photo' => $this->extractPhotoData($taxonData['default_photo'] ?? null),
+        'conservation_status' => $this->extractConservationStatus($taxonData['conservation_status'] ?? null),
+        'taxon_schemes' => $taxonData['taxon_schemes'] ?? [],
+        'taxon_changes_count' => $taxonData['taxon_changes_count'] ?? 0,
+        'taxon_schemes_count' => $taxonData['taxon_schemes_count'] ?? 0,
+        'observations_count' => $taxonData['observations_count'] ?? 0,
+        'universal_search_rank' => $taxonData['universal_search_rank'] ?? null,
+        'iconic_taxon_id' => $taxonData['iconic_taxon_id'] ?? null,
+        'iconic_taxon_name' => $taxonData['iconic_taxon_name'] ?? null,
+        'preferred_common_name' => $taxonData['preferred_common_name'] ?? null,
+        'ancestors' => $this->extractAncestors($taxonData['ancestors'] ?? []),
+        'taxon_photos' => $this->extractTaxonPhotos($taxonData['taxon_photos'] ?? []),
+        'created_at' => $taxonData['created_at'] ?? null,
+        'updated_at' => $taxonData['updated_at'] ?? null,
+        'source' => 'inaturalist',
+    ];
+}
     
     /**
      * Normaliza los datos de una observación

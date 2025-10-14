@@ -23,6 +23,49 @@ class TaxonController extends Controller
     }
     
     /**
+     * Listar todos los taxones con paginación
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function index(Request $request)
+    {
+        $request->validate([
+            'per_page' => 'sometimes|integer|min:1|max:100',
+            'page' => 'sometimes|integer|min:1',
+            'rank' => 'sometimes|string|in:species,genus,family,order,class,phylum,kingdom',
+            'enrich' => 'sometimes|boolean',  // ← Agregado para consistencia
+        ]);
+        
+        $filters = $request->only(['per_page', 'page', 'rank', 'enrich']);
+        $result = $this->taxonService->getAllTaxa($filters);
+        
+        if (!$result['success']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['error']['message'] ?? 'Error al obtener los taxones',
+                'code' => $result['error']['code'] ?? 500,
+                'data' => null,
+            ], $result['error']['code'] ?? 500);
+        }
+        
+        // ← Fix: Enriquecer si se pide (asumiendo getAllTaxa retorna models)
+        $shouldEnrich = $request->boolean('enrich', true);
+        $data = $shouldEnrich ? collect($result['data'])->map->enriched_data->toArray() : $result['data'];
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Taxones obtenidos correctamente',
+            'data' => $data,
+            'meta' => [
+                'source' => $result['source'] ?? 'local',
+                'cached' => $result['cached'] ?? false,
+                'pagination' => $result['pagination'] ?? $result['meta']['pagination'] ?? null,
+            ],
+        ]);
+    }
+    
+    /**
      * Buscar taxones por nombre científico o común
      *
      * @param Request $request
@@ -31,37 +74,47 @@ class TaxonController extends Controller
     public function search(Request $request)
     {
         $request->validate([
-            'q' => 'required|string|min:2|max:255',
+            'q' => 'required|string|max:255',
             'per_page' => 'sometimes|integer|min:1|max:100',
             'page' => 'sometimes|integer|min:1',
             'rank' => 'sometimes|string|in:species,genus,family,order,class,phylum,kingdom',
+            'enrich' => 'sometimes|boolean',
         ]);
         
         $query = $request->input('q');
-        $filters = $request->only(['per_page', 'page', 'rank']);
+        $filters = $request->only(['per_page', 'page', 'rank', 'enrich']);
         
-        $result = $this->taxonService->searchTaxa($query, $filters);
+        // Si el query es 'all', buscamos sin filtro de búsqueda
+        if ($query === 'all') {
+            $result = $this->taxonService->getAllTaxa($filters);
+        } else {
+            $result = $this->taxonService->searchTaxa($query, $filters);
+        }
         
         if (!$result['success']) {
             return response()->json([
                 'success' => false,
                 'message' => $result['error']['message'] ?? 'Error al buscar taxones',
+                'code' => $result['error']['code'] ?? 500,
                 'data' => null,
-            ], 500);
+            ], $result['error']['code'] ?? 500);
         }
+
+        // ← Fix: Usa $data (redundante removida, pero consistente con enriched del service)
+        $data = $result['data'];  // Ya viene enriquecido del service
         
         return response()->json([
             'success' => true,
             'message' => 'Búsqueda completada correctamente',
-            'data' => $result['data'],
+            'data' => $data,
             'meta' => [
-                'source' => $result['source'],
+                'source' => $result['source'] ?? 'unknown',
                 'cached' => $result['cached'] ?? false,
-                'pagination' => $result['pagination'] ?? null,
+                'pagination' => $result['pagination'] ?? $result['meta']['pagination'] ?? null,
             ],
         ]);
     }
-    
+
     /**
      * Obtener un taxón por su ID
      *
@@ -73,25 +126,31 @@ class TaxonController extends Controller
     {
         $request->validate([
             'refresh' => 'sometimes|boolean',
+            'enrich' => 'sometimes|boolean',
         ]);
         
         $forceRefresh = $request->boolean('refresh', false);
+        $shouldEnrich = $request->boolean('enrich', true);
         $result = $this->taxonService->getTaxonById($id, $forceRefresh);
         
         if (!$result['success']) {
             return response()->json([
                 'success' => false,
                 'message' => $result['error']['message'] ?? 'Error al obtener el taxón',
+                'code' => $result['error']['code'] ?? 404,
                 'data' => null,
-            ], 404);
+            ], $result['error']['code'] ?? 404);
         }
+
+        // ← Fix: Usa $data y maneja si no es modelo
+        $data = $shouldEnrich ? $result['data']->enriched_data : $result['data'];
         
         return response()->json([
             'success' => true,
             'message' => 'Taxón obtenido correctamente',
-            'data' => $result['data'],
+            'data' => $data,
             'meta' => [
-                'source' => $result['source'],
+                'source' => $result['source'] ?? 'unknown',
                 'cached' => $result['cached'] ?? false,
             ],
         ]);
@@ -99,13 +158,6 @@ class TaxonController extends Controller
     
     /**
      * Obtener las observaciones de un taxón
-     *
-     * @param int $taxonId
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     */
-    /**
-     * Obtiene observaciones de un taxón específico
      *
      * @param int $taxonId
      * @param Request $request
@@ -128,8 +180,9 @@ class TaxonController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => $result['error']['message'] ?? 'Error al obtener las observaciones del taxón',
+                'code' => $result['error']['code'] ?? 500,
                 'data' => null,
-            ], 500);
+            ], $result['error']['code'] ?? 500);
         }
         
         return response()->json([
@@ -137,7 +190,7 @@ class TaxonController extends Controller
             'message' => 'Observaciones obtenidas correctamente',
             'data' => $result['data'],
             'meta' => [
-                'source' => $result['source'],
+                'source' => $result['source'] ?? 'unknown',
                 'cached' => $result['cached'] ?? false,
                 'pagination' => $result['pagination'] ?? null,
             ],
@@ -145,7 +198,7 @@ class TaxonController extends Controller
     }
     
     /**
-     * Lista especies observadas en un lugar específico
+     * Lista especies cercanas a la ubicación del usuario
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
@@ -155,36 +208,49 @@ class TaxonController extends Controller
         $request->validate([
             'per_page' => 'sometimes|integer|min:1|max:100',
             'page' => 'sometimes|integer|min:1',
-            'order_by' => 'sometimes|string|in:created_at,observed_on,species_guess',
+            'order_by' => 'sometimes|string|in:observations_count,created_at,observed_on',
             'order' => 'sometimes|string|in:asc,desc',
+            'rank' => 'sometimes|string|in:species,genus,family',
+            'enrich' => 'sometimes|boolean',  // ← Agregado para consistencia
         ]);
         
-        $params = $request->only(['per_page', 'page', 'order_by', 'order']);
+        // Obtener parámetros de la solicitud
+        $params = $request->only(['per_page', 'page', 'order_by', 'order', 'rank', 'enrich']);
         
-        // Forzamos el place_id=12731 como solicitado
-        $params['place_id'] = '12731';
-        
-        // Obtenemos las observaciones del lugar
+        // Obtener las especies cercanas a la ubicación
         $result = $this->taxonService->getPlaceObservations($params);
         
         if (!$result['success']) {
             return response()->json([
                 'success' => false,
-                'message' => $result['error']['message'] ?? 'Error al obtener las especies del lugar',
+                'message' => $result['error']['message'] ?? 'Error al obtener las especies cercanas',
+                'code' => $result['error']['code'] ?? 500,
                 'data' => null,
-            ], 500);
+            ], $result['error']['code'] ?? 500);
         }
+
+        // ← Fix: Enriquecer si se pide
+        $shouldEnrich = $request->boolean('enrich', true);
+        $data = $shouldEnrich ? collect($result['data'])->map->enriched_data->toArray() : $result['data'];
         
-        return response()->json([
+        // Construir la respuesta con metadatos de ubicación si están disponibles
+        $response = [
             'success' => true,
-            'message' => 'Especies obtenidas correctamente',
-            'data' => $result['data'],
+            'message' => 'Especies cercanas obtenidas correctamente',
+            'data' => $data,
             'meta' => [
-                'source' => $result['source'],
+                'source' => $result['source'] ?? 'unknown',
                 'cached' => $result['cached'] ?? false,
                 'pagination' => $result['pagination'] ?? null,
-            ],
-        ]);
+            ]
+        ];
+        
+        // Agregar información de ubicación si está disponible
+        if (isset($result['location'])) {
+            $response['meta']['location'] = $result['location'];
+        }
+        
+        return response()->json($response);
     }
     
     /**
@@ -195,64 +261,152 @@ class TaxonController extends Controller
      */
     public function syncObservations($taxonId)
     {
-        // Primero obtenemos el taxón para asegurarnos de que existe
-        $taxonResult = $this->taxonService->getTaxonById($taxonId, true);
-        
-        if (!$taxonResult['success']) {
+        try {
+            // Primero obtenemos el taxón para asegurarnos de que existe
+            $taxonResult = $this->taxonService->getTaxonById($taxonId, true);  // ← Ahora funciona
+            
+            if (!$taxonResult['success']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $taxonResult['error']['message'] ?? 'Error al obtener el taxón',
+                    'code' => $taxonResult['error']['code'] ?? 404,
+                    'data' => null,
+                ], $taxonResult['error']['code'] ?? 404);
+            }
+            
+            // Obtenemos las observaciones de la API
+            $observationsResult = $this->taxonService->getTaxonObservations($taxonId, [
+                'per_page' => 30, // Límite razonable para la sincronización inicial
+                'quality_grade' => 'research', // Solo observaciones de calidad investigativa
+            ]);
+            
+            if (!$observationsResult['success']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $observationsResult['error']['message'] ?? 'Error al obtener las observaciones del taxón',
+                    'code' => $observationsResult['error']['code'] ?? 500,
+                    'data' => null,
+                ], $observationsResult['error']['code'] ?? 500);
+            }
+            
+            // Procesamos y almacenamos las observaciones
+            $processResult = $this->taxonService->processAndStoreObservations(
+                $observationsResult['data'],
+                $taxonId
+            );
+            
+            $message = sprintf(
+                'Se sincronizaron %d de %d observaciones para el taxón %s',
+                $processResult['stored_count'],
+                $processResult['total_processed'],
+                $taxonResult['data']->scientific_name ?? 'ID: ' . $taxonId
+            );
+            
+            if ($processResult['error_count'] > 0) {
+                Log::warning('Algunas observaciones no se pudieron procesar', [
+                    'taxon_id' => $taxonId,
+                    'errors' => $processResult['errors'],
+                ]);
+                
+                $message .= sprintf(' (%d errores)', $processResult['error_count']);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'data' => [
+                    'taxon' => $taxonResult['data']->enriched_data,  // ← Fix: Enriquecido
+                    'observations' => $processResult,
+                ],
+                'meta' => [
+                    'source' => $observationsResult['source'] ?? 'unknown',
+                    'cached' => $observationsResult['cached'] ?? false,
+                ],
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error en syncObservations: ' . $e->getMessage(), [
+                'taxon_id' => $taxonId,
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'message' => $taxonResult['error']['message'] ?? 'Error al obtener el taxón',
-                'data' => null,
-            ], 404);
-        }
-        
-        // Obtenemos las observaciones de la API
-        $observationsResult = $this->taxonService->getTaxonObservations($taxonId, [
-            'per_page' => 30, // Límite razonable para la sincronización inicial
-            'quality_grade' => 'research', // Solo observaciones de calidad investigativa
-        ]);
-        
-        if (!$observationsResult['success']) {
-            return response()->json([
-                'success' => false,
-                'message' => $observationsResult['error']['message'] ?? 'Error al obtener las observaciones del taxón',
+                'message' => 'Error interno del servidor al sincronizar observaciones',
+                'code' => 500,
                 'data' => null,
             ], 500);
         }
-        
-        // Procesamos y almacenamos las observaciones
-        $processResult = $this->taxonService->processAndStoreObservations(
-            $observationsResult['data'],
-            $taxonId
-        );
-        
-        $message = sprintf(
-            'Se sincronizaron %d de %d observaciones para el taxón %s',
-            $processResult['stored_count'],
-            $processResult['total_processed'],
-            $taxonResult['data']->scientific_name
-        );
-        
-        if ($processResult['error_count'] > 0) {
-            Log::warning('Algunas observaciones no se pudieron procesar', [
-                'taxon_id' => $taxonId,
-                'errors' => $processResult['errors'],
+    }
+
+    /**
+     * Obtener estadísticas de un taxón
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function stats($id)
+    {
+        try {
+            $result = $this->taxonService->getTaxonById($id);  // ← Ahora funciona
+            
+            if (!$result['success']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $result['error']['message'] ?? 'Error al obtener el taxón',
+                    'code' => $result['error']['code'] ?? 404,
+                    'data' => null,
+                ], $result['error']['code'] ?? 404);
+            }
+            
+            $taxon = $result['data'];
+            $enriched = $taxon->enriched_data;  // ← Fix: Usa enriched para extras como rank, extinct
+            
+            // Obtener observaciones básicas para estadísticas
+            $observationsResult = $this->taxonService->getTaxonObservations($id, [
+                'per_page' => 1, // Solo necesitamos el total
+                'quality_grade' => 'research',
             ]);
             
-            $message .= sprintf(' (%d errores)', $processResult['error_count']);
+            $stats = [
+                'taxon_id' => $id,
+                'scientific_name' => $enriched['scientific_name'] ?? $enriched['name'] ?? null,
+                'common_name' => $enriched['common_name'] ?? null,
+                'rank' => $enriched['rank'] ?? null,  // ← Del JSON
+                'observations_count' => $enriched['observation_count'] ?? 0,
+                'api_observations_count' => $observationsResult['success'] 
+                    ? ($observationsResult['pagination']['total'] ?? 0) 
+                    : 0,
+                'extinction_status' => ($enriched['extinct'] ?? false) ? 'extinct' : 'not_extinct',  // ← Del JSON
+                'conservation_status' => $enriched['conservation_status'] ?? 'unknown',
+                'has_photos' => !empty($enriched['default_photo']) || !empty($enriched['taxon_photos']),
+                'wikipedia_available' => !empty($enriched['wikipedia_url']),
+                'last_updated' => $enriched['updated_at'] ?? null,
+            ];
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Estadísticas obtenidas correctamente',
+                'data' => $stats,
+                'meta' => [
+                    'source' => $result['source'] ?? 'local',
+                    'cached' => $result['cached'] ?? false,
+                    'generated_at' => now()->toIso8601String(),
+                ],
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error en stats: ' . $e->getMessage(), [
+                'taxon_id' => $id,
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error interno del servidor al obtener estadísticas',
+                'code' => 500,
+                'data' => null,
+            ], 500);
         }
-        
-        return response()->json([
-            'success' => true,
-            'message' => $message,
-            'data' => [
-                'taxon' => $taxonResult['data'],
-                'observations' => $processResult,
-            ],
-            'meta' => [
-                'source' => $observationsResult['source'],
-                'cached' => $observationsResult['cached'] ?? false,
-            ],
-        ]);
     }
 }

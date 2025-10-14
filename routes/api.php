@@ -23,12 +23,13 @@ Route::post('reset-password', [AuthController::class, 'resetPassword']);
 
 // Rutas para la gestión de taxones
 Route::prefix('taxa')->group(function () {
+    Route::get('/', [TaxonController::class, 'index']); // Listar todos los taxones
     Route::get('/search', [TaxonController::class, 'search']); // Buscar taxones
     Route::get('/{id}', [TaxonController::class, 'show']); // Obtener un taxón por ID
     Route::get('/{taxon}/observations', [TaxonController::class, 'observations']); // Obtener observaciones de un taxón
     Route::post('/{taxon}/sync-observations', [TaxonController::class, 'syncObservations']); // Sincronizar observaciones de un taxón
     
-    // Nuevo endpoint para listar especies por lugar
+    // Endpoint para listar especies por lugar
     Route::get('/place/species', [TaxonController::class, 'listSpeciesByPlace']); // Listar especies de un lugar específico
 });
 

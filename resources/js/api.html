@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECOISES - Consulta de Biodiversidad: Especies en Cesar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-center text-blue-600 mb-4">Consulta de Biodiversidad: Especies en Cesar</h1>
+        <p class="text-center text-gray-700 mb-6">Buscando registros desde 2024 con fotografía. Filtra por clase de especie (extraída de taxonomía).</p>
+        
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <div class="flex flex-col md:flex-row gap-4 items-center">
+                <label for="classFilter" class="font-semibold text-gray-800">Filtrar por Clase:</label>
+                <select id="classFilter" class="border border-gray-300 rounded-md p-2 flex-1 md:w-64">
+                    <option value="">Todas las clases</option>
+                    <option value="Aves">Aves</option>
+                    <option value="Mammalia">Mamíferos</option>
+                    <option value="Reptilia">Reptiles</option>
+                    <option value="Amphibia">Anfibios</option>
+                    <option value="Actinopterygii">Peces</option>
+                    <option value="Plantae">Plantas</option>
+                    <option value="Fungi">Hongos</option>
+                    <option value="Other">Otros</option>
+                </select>
+                <button id="searchBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-semibold">Buscar</button>
+            </div>
+        </div>
+
+        <div id="results" class="bg-white rounded-lg shadow-md p-6">
+            <p class="text-gray-500">Selecciona una clase y haz clic en Buscar para ver los resultados con fotografía.</p>
+        </div>
+    </div>
+
+    <script>
+        const baseUrl = 'https://api.catalogo.biodiversidad.co/record_search/advanced_search?department=Cesar&created_after=2024-01-01T00:00:00Z&limit=1000';
+        const searchBtn = document.getElementById('searchBtn');
+        const classFilter = document.getElementById('classFilter');
+        const resultsDiv = document.getElementById('results');
+
+        function hasPhoto(record) {
+            return record.imageInfo && (record.imageInfo.mainImage || record.imageInfo.thumbnailImage);
+        }
+
+        function inferClass(record) {
+            try {
+                // Primero, extraer de taxonomía si está disponible
+                const sciName = record.taxonRecordNameApprovedInUse?.taxonRecordName?.scientificName;
+                const bioClass = sciName?.class;
+                
+                if (bioClass) {
+                    if (bioClass === 'Aves') return 'Aves';
+                    if (bioClass === 'Mammalia') return 'Mammalia';
+                    if (bioClass === 'Reptilia') return 'Reptilia';
+                    if (bioClass === 'Amphibia') return 'Amphibia';
+                    if (bioClass.includes('pterygii')) return 'Actinopterygii';
+                    if (['Magnoliopsida', 'Liliopsida', 'Pinopsida', 'Cycadopsida'].includes(bioClass)) return 'Plantae';
+                    if (bioClass === 'Fungi' || record.taxonRecordNameApprovedInUse?.taxonRecordName?.scientificName?.kingdom === 'Fungi') return 'Fungi';
+                    return bioClass || 'Other';
+                }
+
+                // Fallback a inferencia por keywords si no hay class explícita
+                const desc = record.fullDescriptionApprovedInUse?.fullDescriptionUnstructured?.toLowerCase() || '';
+                const name = record.scientificNameSimple?.toLowerCase() || '';
+                const commonNames = record.commonNames;
+                let common = '';
+                if (commonNames && Array.isArray(commonNames)) {
+                    common = commonNames.map(c => (c?.name || '').toLowerCase()).join(' ');
+                }
+
+                if (desc.includes('ave') || common.includes('pájaro') || common.includes('bird') || name.includes('myiothlypis')) {
+                    return 'Aves';
+                }
+                if (desc.includes('mamífero') || common.includes('mono') || common.includes('mammal') || name.includes('cebus') || name.includes('ateles')) {
+                    return 'Mammalia';
+                }
+                if (desc.includes('reptil') || desc.includes('lagarto') || desc.includes('serpiente') || desc.includes('cocodrilo') || name.includes('crocodylus') || name.includes('anolis')) {
+                    return 'Reptilia';
+                }
+                if (desc.includes('anfibio') || desc.includes('rana') || desc.includes('sapo') || desc.includes('frog') || name.includes('scinax') || name.includes('pristimantis')) {
+                    return 'Amphibia';
+                }
+                if (desc.includes('pez') || desc.includes('fish') || name.includes('potamotrygon') || name.includes('chaetostoma')) {
+                    return 'Actinopterygii';
+                }
+                if (desc.includes('planta') || desc.includes('plant') || name.includes('zamia') || name.includes('caryocar') || name.includes('bidens') || sciName?.kingdom === 'Plantae') {
+                    return 'Plantae';
+                }
+                if (desc.includes('hongo') || desc.includes('fungus') || name.includes('rhizoctonia')) {
+                    return 'Fungi';
+                }
+                return 'Other';
+            } catch (error) {
+                console.warn('Error inferring class for record:', error, record);
+                return 'Other';
+            }
+        }
+
+        function fetchData(filterClass = '') {
+            resultsDiv.innerHTML = '<p class="text-gray-500">Cargando...</p>';
+
+            fetch(baseUrl)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Error: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Datos recibidos:', data);
+                    
+                    let allResults = [];
+                    let totalCount = 0;
+                    let filteredCount = 0;
+
+                    if (Array.isArray(data) && data.length > 0) {
+                        // Filtrar solo aquellos con foto
+                        const resultsWithPhoto = data.filter(record => hasPhoto(record));
+                        totalCount = resultsWithPhoto.length;
+                        
+                        const filteredResults = resultsWithPhoto.filter(record => {
+                            const inferred = inferClass(record);
+                            return !filterClass || inferred === filterClass;
+                        });
+                        
+                        filteredCount = filteredResults.length;
+                        allResults = resultsWithPhoto;
+                    }
+
+                    // Mostrar resumen
+                    let html = `
+                        <h2 class="text-2xl font-bold mb-4 text-gray-800">Resumen de Resultados (con Fotografía)</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div class="bg-blue-50 p-4 rounded-md">
+                                <p class="text-sm text-gray-600">Total de registros con foto</p>
+                                <p class="text-2xl font-bold text-blue-600">${totalCount}</p>
+                            </div>
+                            <div class="bg-green-50 p-4 rounded-md">
+                                <p class="text-sm text-gray-600">Registros filtrados</p>
+                                <p class="text-2xl font-bold text-green-600">${filteredCount}</p>
+                            </div>
+                            <div class="bg-yellow-50 p-4 rounded-md">
+                                <p class="text-sm text-gray-600">Clase seleccionada</p>
+                                <p class="text-2xl font-bold text-yellow-600">${filterClass || 'Todas'}</p>
+                            </div>
+                        </div>
+                    `;
+
+                    if (filteredCount > 0) {
+                        html += `
+                            <h3 class="text-xl font-semibold mb-4 text-gray-800">Lista de Especies</h3>
+                            <ul class="space-y-3">
+                        `;
+
+                        allResults.filter(record => {
+                            const inferred = inferClass(record);
+                            return !filterClass || inferred === filterClass;
+                        }).forEach(record => {
+                            const inferredClass = inferClass(record);
+                            const scientificName = record.scientificNameSimple || record.taxonRecordNameApprovedInUse?.taxonRecordName?.scientificName?.canonicalName?.simple || 'Nombre no disponible';
+                            const family = record.taxonRecordNameApprovedInUse?.taxonRecordName?.scientificName?.family || 'N/A';
+                            const municipality = record.department || 'N/A';
+                            const mainImage = record.imageInfo?.mainImage || record.imageInfo?.thumbnailImage || '';
+
+                            html += `
+                                <li class="bg-gray-50 p-4 rounded-md shadow-sm border-l-4 ${inferredClass === 'Aves' ? 'border-red-500' : inferredClass === 'Mammalia' ? 'border-green-500' : inferredClass === 'Reptilia' ? 'border-blue-500' : inferredClass === 'Plantae' ? 'border-purple-500' : 'border-gray-500'} flex gap-4">
+                                    ${mainImage ? `<img src="${mainImage}" alt="${scientificName}" class="w-24 h-24 object-cover rounded-md flex-shrink-0">` : ''}
+                                    <div class="flex-1">
+                                        <h4 class="font-bold text-lg text-gray-900">${inferredClass}</h4>
+                                        <p class="text-gray-700 mt-1">${scientificName}</p>
+                                        <p class="text-sm text-gray-500 mt-2">
+                                            Familia: <span class="font-medium">${family}</span> | 
+                                            Departamento: <span class="font-medium">${municipality}</span>
+                                        </p>
+                                    </div>
+                                </li>
+                            `;
+                        });
+
+                        html += '</ul>';
+                    } else {
+                        html += '<p class="text-gray-500 text-center py-8">No se encontraron registros con fotografía para el filtro seleccionado.</p>';
+                    }
+
+                    resultsDiv.innerHTML = html;
+
+                    // Log en consola
+                    console.log(`Total con foto: ${totalCount}, Filtrados: ${filteredCount}`);
+                    if (filteredCount > 0) {
+                        console.log('Detalles:', allResults.filter(r => !filterClass || inferClass(r) === filterClass).map(r => ({ class: inferClass(r), name: r.scientificNameSimple })));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error en la petición:', error);
+                    resultsDiv.innerHTML = `<p class="text-red-600 text-center py-8">Error: ${error.message}</p>`;
+                });
+        }
+
+        searchBtn.addEventListener('click', () => {
+            const selectedClass = classFilter.value;
+            fetchData(selectedClass);
+        });
+
+        // Carga inicial sin filtro
+        fetchData();
+    </script>
+</body>
+</html>

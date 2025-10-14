@@ -23,6 +23,7 @@ class TaxonApiReference extends Model
         'confidence_score',
         'is_primary',
         'last_verified_at',
+        'data',
     ];
     
     /**
@@ -33,6 +34,7 @@ class TaxonApiReference extends Model
     protected $casts = [
         'is_primary' => 'boolean',
         'last_verified_at' => 'datetime',
+        'data' => 'array',
     ];
 
     // Relaciones
