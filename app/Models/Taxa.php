@@ -65,28 +65,29 @@ class Taxa extends Model
     /**
      * Accessor para datos enriquecidos (une essentials + API)
      */
-    public function getEnrichedDataAttribute(): array
-    {
-        $enriched = $this->toArray();  // Datos locales de taxa
+   public function getEnrichedDataAttribute(): array
+{
+    $enriched = $this->toArray();
 
-        // FIX: Maneja si es Collection (toma el primero) o single model
-        $ref = $this->apiReferences;
-        if ($ref instanceof \Illuminate\Database\Eloquent\Collection) {
-            $ref = $ref->first();  // Toma la primaria o primera
-        }
+    $ref = $this->apiReferences()->first();
+    if ($ref && $ref->data) {
+        $apiData = $ref->data;
+        $enriched = array_merge($enriched, [
+            'rank' => $apiData['rank'] ?? null,
+            'wikipedia_url' => $apiData['wikipedia_url'] ?? null,
+            'default_photo' => $apiData['default_photo'] ?? null,
+            'observations_count_api' => $apiData['observations_count'] ?? 0,
+            'ancestry_full' => $apiData['ancestry'] ?? null,
+        ]);
 
-        if ($ref && $ref->data) {
-            // Merge selectivo
-            $apiData = $ref->data;  // Array por cast
-            $enriched = array_merge($enriched, [
-                'rank' => $apiData['rank'] ?? null,
-                'wikipedia_url' => $apiData['wikipedia_url'] ?? null,
-                'default_photo' => $apiData['default_photo'] ?? null,
-                'observations_count_api' => $apiData['observations_count'] ?? 0,
-                'ancestry_full' => $apiData['ancestry'] ?? null,
-            ]);
-        }
-
-        return $enriched;
+        // Extraer status de establecimiento directamente de los datos de la API
+        $service = app(\App\Services\TaxonService::class);
+        $establishmentData = $service->extractEstablishmentStatusFromApiData($apiData);
+        $enriched['is_native'] = $establishmentData['is_native'];
+        $enriched['is_endemic'] = $establishmentData['is_endemic'];
+        $enriched['establishment_status_colombia'] = $establishmentData['status'];  // Para frontend
     }
+
+    return $enriched;
+}
 }

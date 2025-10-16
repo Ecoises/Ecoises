@@ -15,23 +15,19 @@ Route::post('/auth/google', [GoogleController::class, 'authenticate']);
 Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('reset-password', [AuthController::class, 'resetPassword']);
 
-// Rutas públicas
-// Route::prefix('observations')->group(function () {
-//     Route::get('/', [ObservationController::class, 'index']);
-//     Route::get('/public', [ObservationController::class, 'publicObservations']);
-// });
-
 // Rutas para la gestión de taxones
 Route::prefix('taxa')->group(function () {
     Route::get('/', [TaxonController::class, 'index']); // Listar todos los taxones
     Route::get('/search', [TaxonController::class, 'search']); // Buscar taxones
     Route::get('/{id}', [TaxonController::class, 'show']); // Obtener un taxón por ID
-    Route::get('/{taxon}/observations', [TaxonController::class, 'observations']); // Obtener observaciones de un taxón
+    Route::get('/observations/{taxonId}', [TaxonController::class, 'observations'])->name('taxa.observations'); // Obtener observaciones de un taxón
     Route::post('/{taxon}/sync-observations', [TaxonController::class, 'syncObservations']); // Sincronizar observaciones de un taxón
     
     // Endpoint para listar especies por lugar
     Route::get('/place/species', [TaxonController::class, 'listSpeciesByPlace']); // Listar especies de un lugar específico
 });
+
+
 
 // Rutas protegidas (requieren autenticación)
 Route::middleware('auth:sanctum')->group(function () {

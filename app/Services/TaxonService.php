@@ -5,9 +5,12 @@ namespace App\Services;
 use App\Models\Taxa;
 use App\Models\TaxonApiReference;
 use App\Models\UnifiedApiCache;
+use App\Models\Observation;
 use App\Services\Api\INaturalistService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Collection;
 
 class TaxonService
 {
@@ -91,8 +94,6 @@ class TaxonService
      * @param array $filters
      * @return array
      */
-     // Agrega si no está (para collect())
-
     public function searchTaxa(string $query, array $filters = []): array
     {
         // Si la consulta está vacía, buscamos especies populares o todas las especies
@@ -131,7 +132,7 @@ class TaxonService
                 }
             }
             
-            // NUEVO: Enriquecer con datos unidos
+            // Enriquecer con datos unidos
             $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
             
             return [
@@ -153,7 +154,7 @@ class TaxonService
         
         // Si hay resultados locales, los enriquecemos y devolvemos
         if (!empty($localResults['data'])) {
-            // NUEVO: Enriquecer locales (asumiendo que son Taxa models o paginador)
+            // Enriquecer locales (asumiendo que son Taxa models o paginador)
             $formattedLocal = collect($localResults['data'])->map(function ($taxon) {
                 return $taxon instanceof Taxa ? $taxon->enriched_data : $taxon;
             })->toArray();
@@ -193,7 +194,7 @@ class TaxonService
                 }
             }
             
-            // NUEVO: Enriquecer con datos unidos
+            // Enriquecer con datos unidos
             $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
             
             return [
@@ -223,7 +224,7 @@ class TaxonService
             ];
         }
     }
-        
+    
     /**
      * Busca taxones en la base de datos local
      *
@@ -290,7 +291,7 @@ class TaxonService
         }
         
         // Si no se encontró localmente o se forzó la actualización, buscamos en la API
-        $apiResult = $this->iNaturalistService->getTaxonById($id);
+        $apiResult = $this->iNaturalistService->getTaxonById((string)$id);
         
         if (!$apiResult['success']) {
             return [
@@ -319,13 +320,6 @@ class TaxonService
         ];
     }
     
-    /**
-     * Obtiene las observaciones de un taxón
-     *
-     * @param int $taxonId
-     * @param array $params
-     * @return array
-     */
     /**
      * Obtiene observaciones de un taxón específico
      *
@@ -403,7 +397,7 @@ class TaxonService
         });
         
         try {
-            // Usar el método getTaxa del servicio iNaturalist para buscar especies por ubicación
+            // Usar el método searchTaxon del servicio iNaturalist para buscar especies por ubicación
             $apiResult = $this->iNaturalistService->searchTaxon('', array_merge($apiParams, [
                 'only_id' => false,
                 'rank' => 'species', // Solo especies, no géneros o familias
@@ -565,137 +559,388 @@ class TaxonService
      * @return Taxa|null
      */
     protected function createOrUpdateTaxonFromApiData(array $taxonData): ?Taxa
-{
-    $scientificName = $taxonData['scientific_name'] ?? $taxonData['name'] ?? null;
-    Log::info('Procesando taxón API', ['scientific_name' => $scientificName, 'keys' => array_keys($taxonData)]);  // ← TEMP: Para debug
-    if (!$scientificName) {
-        Log::warning('Saltando taxón sin scientific_name', ['data_keys' => array_keys($taxonData)]);
-        return null;
-    }
+    {
+        $scientificName = $taxonData['scientific_name'] ?? $taxonData['name'] ?? null;
+        Log::info('Procesando taxón API', ['scientific_name' => $scientificName]);
 
-    try {
-        DB::beginTransaction();
-
-        $taxon = Taxa::where('scientific_name', $scientificName)->first();
-        if (!$taxon) {
-            $taxon = new Taxa(['scientific_name' => $scientificName]);
+        if (!$scientificName) {
+            Log::warning('Saltando taxón sin scientific_name', ['data_keys' => array_keys($taxonData)]);
+            return null;
         }
 
-        $taxon->common_name = $taxonData['preferred_common_name'] ?? $this->getCommonNameFromApi($taxonData);
+        try {
+            DB::beginTransaction();
 
-        // ← Fix: Maneja ancestry como IDs (no names); por ahora, usa nulls o fetch si quieres
-        $ancestry = $this->extractAncestryFromApi($taxonData);
-        $taxon->kingdom = $ancestry['kingdom'] ?? null;
-        $taxon->phylum = $ancestry['phylum'] ?? null;
-        $taxon->class = $ancestry['class'] ?? null;
-        $taxon->order_name = $ancestry['order'] ?? null;
-        $taxon->family = $ancestry['family'] ?? null;
-        $taxon->genus = $ancestry['genus'] ?? null;
-        $taxon->species = $ancestry['species'] ?? null;
+            $taxon = Taxa::where('scientific_name', $scientificName)->first() ?? new Taxa(['scientific_name' => $scientificName]);
+            $taxon->common_name = $taxonData['preferred_common_name'] ?? $this->getCommonNameFromApi($taxonData);
 
-        $taxon->conservation_status = $this->mapConservationStatus($taxonData['conservation_statuses'] ?? $taxonData['conservation_status'] ?? null);  // ← Fix: Toma 'statuses' si existe
+            // Ancestry (por ahora nulls; IDs en enriched_data)
+            $ancestry = $this->extractAncestryFromApi($taxonData);
+            $taxon->kingdom = $ancestry['kingdom'] ?? null;
+            $taxon->phylum = $ancestry['phylum'] ?? null;
+            $taxon->class = $ancestry['class'] ?? null;
+            $taxon->order_name = $ancestry['order'] ?? null;
+            $taxon->family = $ancestry['family'] ?? null;
+            $taxon->genus = $ancestry['genus'] ?? null;
+            $taxon->species = $ancestry['species'] ?? null;
 
-        $taxon->observation_count = ($taxon->observation_count ?? 0) + ($taxonData['observations_count'] ?? 0);
-        $taxon->last_observed_at = now();
-        $taxon->is_native = $taxonData['is_native'] ?? true;
-        $taxon->is_endemic = $taxonData['is_endemic'] ?? false;
+            // Fetch status específico de Colombia (place_id=7196)
+            $colombiaStatus = $this->getEstablishmentStatusForColombia($taxonData['id'] ?? null);
+            $flags = $this->mapEstablishmentMeans($colombiaStatus);
+            $taxon->is_native = $flags['is_native'];
+            $taxon->is_endemic = $flags['is_endemic'];
 
-        $taxon->save();  // ← Si falla aquí, log en catch
+            $taxon->conservation_status = $this->mapConservationStatus($taxonData['conservation_statuses'] ?? $taxonData['conservation_status'] ?? null);
+            $taxon->observation_count = ($taxon->observation_count ?? 0) + ($taxonData['observations_count'] ?? 0);
+            $taxon->last_observed_at = now();
+            $taxon->save();
 
-        $this->updateOrCreateApiReference($taxon, $taxonData);
+            $this->updateOrCreateApiReference($taxon, $taxonData);
 
-        DB::commit();
+            DB::commit();
+            Log::info('Taxón guardado exitosamente', ['id' => $taxon->id]);
+            return $taxon->load('apiReferences');
 
-        Log::info('Taxón guardado exitosamente', ['id' => $taxon->id]);
-
-        return $taxon->load('apiReferences');
-
-    } catch (\Exception $e) {
-        DB::rollBack();
-        Log::error('Error guardando taxón: ' . $e->getMessage(), ['scientific_name' => $scientificName, 'trace' => $e->getTraceAsString()]);  // ← TEMP: Más detalle
-        return null;
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error guardando taxón: ' . $e->getMessage(), ['scientific_name' => $scientificName]);
+            return null;
+        }
     }
+
+    /**
+     * Obtiene status de establecimiento para un taxón en Colombia (place_id=7196)
+     * Cachea por 24h para evitar llamadas repetidas.
+     */
+   public function getEstablishmentStatusForColombia(?string $taxonId): ?string
+    {
+        if (!$taxonId) {
+            return null;
+        }
+
+        $cacheKey = "taxon_status_colombia_{$taxonId}";
+        
+        // Primero intentamos obtener del cache
+        $cachedValue = Cache::get($cacheKey);
+        
+        // Si existe en cache y NO es null, retornarlo
+        if ($cachedValue !== null) {
+            Log::info('📦 Status desde cache', ['id' => $taxonId, 'status' => $cachedValue]);
+            return $cachedValue;
+        }
+
+        try {
+            // ✅ CRÍTICO: Usar preferred_place_id en lugar de place_id
+            $response = $this->iNaturalistService->getTaxonById($taxonId, [
+                'preferred_place_id' => 7196,  // Esto es lo que faltaba
+                'locale' => 'es'
+            ]);
+
+            if ($response['success'] && isset($response['data'])) {
+                $taxon = $response['data'];
+                
+                // Intentar extraer el status en orden de prioridad
+                $status = null;
+                
+                // 1. Primero preferred_establishment_means (el más confiable)
+                if (isset($taxon['preferred_establishment_means'])) {
+                    $status = $taxon['preferred_establishment_means'];
+                    Log::info('✅ Status de preferred_establishment_means', [
+                        'id' => $taxonId, 
+                        'status' => $status
+                    ]);
+                }
+                // 2. Luego establishment_means array
+                elseif (isset($taxon['establishment_means']) && is_array($taxon['establishment_means']) && !empty($taxon['establishment_means'])) {
+                    $status = $taxon['establishment_means'][0]['establishment_means'] ?? 
+                            $taxon['establishment_means'][0]['means'] ?? null;
+                    Log::info('✅ Status de establishment_means array', [
+                        'id' => $taxonId, 
+                        'status' => $status
+                    ]);
+                }
+                // 3. Flags booleanos como último recurso
+                else {
+                    if (!empty($taxon['endemic'])) {
+                        $status = 'endemic';
+                    } elseif (!empty($taxon['introduced'])) {
+                        $status = 'introduced';
+                    } elseif (!empty($taxon['native'])) {
+                        $status = 'native';
+                    }
+                    
+                    Log::info('⚠️ Status inferido de flags booleanos', [
+                        'id' => $taxonId,
+                        'status' => $status,
+                        'endemic' => $taxon['endemic'] ?? false,
+                        'introduced' => $taxon['introduced'] ?? false,
+                        'native' => $taxon['native'] ?? false
+                    ]);
+                }
+
+                // Solo cachear si encontramos un status válido
+                if ($status !== null) {
+                    Cache::put($cacheKey, $status, 86400); // 24 horas
+                    return $status;
+                }
+                
+                Log::warning('⚠️ No se pudo determinar status', [
+                    'id' => $taxonId,
+                    'available_fields' => array_keys($taxon)
+                ]);
+                return null;
+            }
+            
+            Log::warning('❌ API no devolvió datos', ['id' => $taxonId]);
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error('💥 Error fetching status Colombia', [
+                'id' => $taxonId, 
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+ * Extrae el status de establecimiento correctamente de los datos de la API
+ * CORREGIDO: Ahora busca en los lugares correctos según la estructura real de iNaturalist
+ */
+public function extractEstablishmentStatusFromApiData(array $apiData): array
+{
+    Log::info('🔍 Extrayendo establishment status', [
+        'has_preferred_establishment_means' => isset($apiData['preferred_establishment_means']),
+        'preferred_establishment_means' => $apiData['preferred_establishment_means'] ?? null,
+        'has_establishment_means' => isset($apiData['establishment_means']),
+        'has_listed_taxa' => isset($apiData['listed_taxa']),
+    ]);
+
+    $status = null;
+    
+    // MÉTODO 1: preferred_establishment_means (el más directo)
+    if (isset($apiData['preferred_establishment_means']) && !empty($apiData['preferred_establishment_means'])) {
+        $status = $apiData['preferred_establishment_means'];
+        Log::info('✅ Status de preferred_establishment_means', ['status' => $status]);
+        return $this->mapEstablishmentMeans($status);
+    }
+
+    // MÉTODO 2: establishment_means (objeto con place)
+    if (isset($apiData['establishment_means']) && is_array($apiData['establishment_means'])) {
+        // Puede ser un objeto simple o array
+        if (isset($apiData['establishment_means']['establishment_means'])) {
+            // Es un objeto: { "establishment_means": "endemic", "place": {...} }
+            $status = $apiData['establishment_means']['establishment_means'];
+            Log::info('✅ Status de establishment_means (objeto)', ['status' => $status]);
+            return $this->mapEstablishmentMeans($status);
+        } elseif (isset($apiData['establishment_means'][0]['establishment_means'])) {
+            // Es un array: [{ "establishment_means": "endemic", "place": {...} }]
+            $status = $apiData['establishment_means'][0]['establishment_means'];
+            Log::info('✅ Status de establishment_means (array)', ['status' => $status]);
+            return $this->mapEstablishmentMeans($status);
+        }
+    }
+
+    // MÉTODO 3: listed_taxa (buscar Colombia place_id=7196)
+    if (isset($apiData['listed_taxa']) && is_array($apiData['listed_taxa'])) {
+        foreach ($apiData['listed_taxa'] as $listedTaxon) {
+            if (isset($listedTaxon['place']['id']) && $listedTaxon['place']['id'] == 7196) {
+                $status = $listedTaxon['establishment_means'] ?? null;
+                if ($status) {
+                    Log::info('✅ Status de listed_taxa (Colombia)', ['status' => $status]);
+                    return $this->mapEstablishmentMeans($status);
+                }
+            }
+        }
+    }
+
+    // MÉTODO 4: Flags booleanos (fallback)
+    if (!empty($apiData['endemic'])) {
+        $status = 'endemic';
+        Log::info('⚠️ Status inferido de flag endemic', ['status' => $status]);
+        return ['is_native' => true, 'is_endemic' => true, 'status' => $status];
+    }
+    
+    if (!empty($apiData['introduced'])) {
+        $status = 'introduced';
+        Log::info('⚠️ Status inferido de flag introduced', ['status' => $status]);
+        return ['is_native' => false, 'is_endemic' => false, 'status' => $status];
+    }
+    
+    if (!empty($apiData['native'])) {
+        $status = 'native';
+        Log::info('⚠️ Status inferido de flag native', ['status' => $status]);
+        return ['is_native' => true, 'is_endemic' => false, 'status' => $status];
+    }
+
+    // No se pudo determinar
+    Log::warning('❌ No se pudo determinar establishment status', [
+        'available_keys' => array_keys($apiData)
+    ]);
+    
+    return ['is_native' => false, 'is_endemic' => false, 'status' => 'unknown'];
+}
+
+/**
+ * Mapea status de establecimiento a flags locales
+ */
+public function mapEstablishmentMeans(?string $status): array
+{
+    $statusLower = strtolower($status ?? '');
+    
+    $map = [
+        'endemic' => ['is_native' => true, 'is_endemic' => true, 'status' => 'endemic'],
+        'native' => ['is_native' => true, 'is_endemic' => false, 'status' => 'native'],
+        'introduced' => ['is_native' => false, 'is_endemic' => false, 'status' => 'introduced'],
+    ];
+    
+    return $map[$statusLower] ?? ['is_native' => false, 'is_endemic' => false, 'status' => 'unknown'];
 }
 
     /**
- * Extrae nombre común de datos API
- */
-protected function getCommonNameFromApi(array $taxonData): ?string
-{
-    return $taxonData['preferred_common_name'] ?? 
-           ($taxonData['common_names'][0]['name'] ?? null) ?? 
-           null;
-}
+     * Extrae nombre común de datos API
+     */
+    protected function getCommonNameFromApi(array $taxonData): ?string
+    {
+        return $taxonData['preferred_common_name'] ?? 
+            ($taxonData['common_names'][0]['name'] ?? null) ?? 
+            null;
+    }
 
-/**
- * Extrae ancestry para jerarquía (de iNaturalist)
- */
-protected function extractAncestryFromApi(array $taxonData): array
-{
-    $ancestry = [];
-    if (isset($taxonData['ancestry']) && is_string($taxonData['ancestry'])) {
-        // iNaturalist usa comma IDs, no | names
-        $parts = explode(',', $taxonData['ancestry']);
-        if (count($parts) >= 7) {  // Mínimo para kingdom to species
-            // Por ahora, nulls; para names, fetch /taxa/{id} por cada (lento, haz lazy si necesitas)
-            $ancestry = [
-                'kingdom' => null,  // Fetch later if needed
-                'phylum' => null,
-                'class' => null,
-                'order' => null,
-                'family' => null,
-                'genus' => null,
-                'species' => null,
+    /**
+     * Extrae ancestry para jerarquía (de iNaturalist)
+     */
+    protected function extractAncestryFromApi(array $taxonData): array
+    {
+        $ancestry = [];
+        if (isset($taxonData['ancestry']) && is_string($taxonData['ancestry'])) {
+            // iNaturalist usa comma IDs, no | names
+            $parts = explode(',', $taxonData['ancestry']);
+            if (count($parts) >= 7) {  // Mínimo para kingdom to species
+                // Por ahora, nulls; para names, fetch /taxa/{id} por cada (lento, haz lazy si necesitas)
+                $ancestry = [
+                    'kingdom' => null,  // Fetch later if needed
+                    'phylum' => null,
+                    'class' => null,
+                    'order' => null,
+                    'family' => null,
+                    'genus' => null,
+                    'species' => null,
+                ];
+            }
+        } elseif (isset($taxonData['ancestors']) && is_array($taxonData['ancestors'])) {
+            // Si normalizas a array con names
+            foreach ($taxonData['ancestors'] as $ancestor) {
+                $ancestry[strtolower($ancestor['rank'] ?? '')] = $ancestor['name'] ?? null;
+            }
+        }
+        // Fallback para genus/species de name
+        if (isset($taxonData['name']) && strpos($taxonData['name'], ' ') !== false) {
+            [$genus, $species] = explode(' ', $taxonData['name'], 2);
+            $ancestry['genus'] = $genus;
+            $ancestry['species'] = $species;
+        }
+        return $ancestry;
+    }
+
+    /**
+     * Mapea status de conservación a formato ENUM de tu base de datos
+     * CORREGIDO: iNaturalist devuelve directamente los códigos IUCN (LC, VU, EN, etc.)
+     * 
+     * @param mixed $apiStatus Puede ser string, array o null
+     * @return string El código IUCN o 'NE' si no se encuentra
+     */
+    protected function mapConservationStatus($apiStatus): string
+    {
+        // Si es null, retornar 'NE' (No Evaluado)
+        if ($apiStatus === null) {
+            return 'NE';
+        }
+        
+        // Si es un array (conservation_statuses de iNaturalist)
+        if (is_array($apiStatus)) {
+            // Si está vacío, retornar 'NE'
+            if (empty($apiStatus)) {
+                return 'NE';
+            }
+            
+            // Tomar el primer status (generalmente IUCN global)
+            $firstStatus = $apiStatus[0] ?? null;
+            
+            if ($firstStatus && isset($firstStatus['status'])) {
+                $statusCode = $firstStatus['status'];
+                Log::info('📊 Status de conservación extraído', [
+                    'raw' => $firstStatus,
+                    'status_code' => $statusCode,
+                    'authority' => $firstStatus['authority'] ?? 'unknown'
+                ]);
+                
+                // Validar que sea un código IUCN válido
+                if ($this->isValidIUCNStatus($statusCode)) {
+                    return $statusCode;
+                }
+            }
+            
+            return 'NE';
+        }
+        
+        // Si es un string directo, validar y retornar
+        if (is_string($apiStatus)) {
+            // Normalizar a mayúsculas
+            $statusUpper = strtoupper($apiStatus);
+            
+            // Si ya es un código IUCN válido, retornarlo
+            if ($this->isValidIUCNStatus($statusUpper)) {
+                return $statusUpper;
+            }
+            
+            // Si está en formato de texto completo en inglés, convertir
+            $textToCodeMap = [
+                'least_concern' => 'LC',
+                'least concern' => 'LC',
+                'near_threatened' => 'NT',
+                'near threatened' => 'NT',
+                'vulnerable' => 'VU',
+                'endangered' => 'EN',
+                'critically_endangered' => 'CR',
+                'critically endangered' => 'CR',
+                'extinct_in_the_wild' => 'EW',
+                'extinct in the wild' => 'EW',
+                'extinct' => 'EX',
+                'data_deficient' => 'DD',
+                'data deficient' => 'DD',
+                'not_evaluated' => 'NE',
+                'not evaluated' => 'NE',
             ];
+            
+            $statusLower = strtolower($apiStatus);
+            if (isset($textToCodeMap[$statusLower])) {
+                return $textToCodeMap[$statusLower];
+            }
         }
-    } elseif (isset($taxonData['ancestors']) && is_array($taxonData['ancestors'])) {
-        // Si normalizas a array con names
-        foreach ($taxonData['ancestors'] as $ancestor) {
-            $ancestry[strtolower($ancestor['rank'] ?? '')] = $ancestor['name'] ?? null;
-        }
-    }
-    // Fallback para genus/species de name
-    if (isset($taxonData['name']) && strpos($taxonData['name'], ' ') !== false) {
-        [$genus, $species] = explode(' ', $taxonData['name'], 2);
-        $ancestry['genus'] = $genus;
-        $ancestry['species'] = $species;
-    }
-    return $ancestry;
-}
-
-/**
- * Mapea status de conservación a tu ENUM (maneja array de API)
- */
-protected function mapConservationStatus($apiStatus): ?string
-{
-    // FIX: Si es array (de iNaturalist), toma el status del primero (e.g., IUCN global)
-    if (is_array($apiStatus) && !empty($apiStatus)) {
-        $apiStatus = $apiStatus[0]['status'] ?? null;  // O $apiStatus[0]['iucn_status'] si es el campo
-    }
-    
-    // Si aún no es string, null
-    if (!is_string($apiStatus)) {
+        
+        // Si no se pudo determinar, retornar 'NE'
+        Log::warning('⚠️ No se pudo mapear conservation status', [
+            'input' => $apiStatus,
+            'type' => gettype($apiStatus)
+        ]);
+        
         return 'NE';
     }
-    
-    $map = [
-        'least_concern' => 'LC',
-        'near_threatened' => 'NT',
-        'vulnerable' => 'VU',
-        'endangered' => 'EN',
-        'critically_endangered' => 'CR',
-        'extinct_in_the_wild' => 'EW',
-        'extinct' => 'EX',
-        // Agrega más si necesitas (e.g., 'data_deficient' => 'DD')
-    ];
-    return $map[$apiStatus] ?? 'NE';  // No Evaluado
-}
 
-/**
- * Actualiza/crea referencia API (JSON completo)
- */
+    /**
+     * Valida si un código es un status IUCN válido
+     * 
+     * @param string $code
+     * @return bool
+     */
+    protected function isValidIUCNStatus(string $code): bool
+    {
+        $validCodes = ['LC', 'NT', 'VU', 'EN', 'CR', 'EW', 'EX', 'DD', 'NE'];
+        return in_array(strtoupper($code), $validCodes);
+    }
 
-    
     /**
      * Actualiza o crea una referencia a la API para un taxón
      *
@@ -704,35 +949,35 @@ protected function mapConservationStatus($apiStatus): ?string
      * @return void
      */
     protected function updateOrCreateApiReference(Taxa $taxon, array $taxonData): void
-{
-    // Primero, guarda la ref principal
-    TaxonApiReference::updateOrCreate(
-        ['taxon_id' => $taxon->id, 'api_source' => 'inaturalist'],
-        [
-            'external_id' => $taxonData['id'] ?? null,
-            'api_url' => $taxonData['url'] ?? null,
-            'confidence_score' => 1.0,
-            'is_primary' => true,
-            'last_verified_at' => now(),
-            'data' => $taxonData,  // Completo
-        ]
-    );
+    {
+        // Primero, guarda la ref principal
+        TaxonApiReference::updateOrCreate(
+            ['taxon_id' => $taxon->id, 'api_source' => 'inaturalist'],
+            [
+                'external_id' => $taxonData['id'] ?? null,
+                'api_url' => $taxonData['url'] ?? null,
+                'confidence_score' => 1.0,
+                'is_primary' => true,
+                'last_verified_at' => now(),
+                'data' => $taxonData,  // Completo
+            ]
+        );
 
-    // FIX: Si cacheas fotos (de 'default_photo' o 'taxon_photos'), pasa response_data
-    if (isset($taxonData['default_photo']) || isset($taxonData['taxon_photos'])) {
-        $photoData = $taxonData['default_photo'] ?? $taxonData['taxon_photos'][0] ?? null;
-        if ($photoData) {
-            $cacheKey = 'taxon_photo_' . $taxon->id;  // O usa $taxonData['id']
-            UnifiedApiCache::updateOrCreate(
-                ['cache_key' => $cacheKey, 'api_source' => 'inaturalist'],
-                [
-                    'response_data' => json_encode($photoData),  // ← FIX: Siempre pasa esto (JSON del photo)
-                    'expires_at' => now()->addDays(7),  // TTL ejemplo
-                ]
-            );
+        // FIX: Si cacheas fotos (de 'default_photo' o 'taxon_photos'), pasa response_data
+        if (isset($taxonData['default_photo']) || isset($taxonData['taxon_photos'])) {
+            $photoData = $taxonData['default_photo'] ?? $taxonData['taxon_photos'][0] ?? null;
+            if ($photoData) {
+                $cacheKey = 'taxon_photo_' . $taxon->id;  // O usa $taxonData['id']
+                UnifiedApiCache::updateOrCreate(
+                    ['cache_key' => $cacheKey, 'api_source' => 'inaturalist'],
+                    [
+                        'response_data' => json_encode($photoData),  // ← FIX: Siempre pasa esto (JSON del photo)
+                        'expires_at' => now()->addDays(7),  // TTL ejemplo
+                    ]
+                );
+            }
         }
     }
-}
     
     /**
      * Procesa y almacena las observaciones de un taxón
@@ -780,9 +1025,6 @@ protected function mapConservationStatus($apiStatus): ?string
      */
     protected function createOrUpdateObservation(array $observationData, int $taxonId)
     {
-        // Aquí implementarías la lógica para guardar la observación
-        // Este es un ejemplo básico que necesitarías adaptar a tu modelo de datos
-        
         $observation = \App\Models\Observation::updateOrCreate(
             ['id' => $observationData['id']],
             [
