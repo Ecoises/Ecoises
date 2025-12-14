@@ -65,7 +65,7 @@ class INaturalistService extends BaseApiService
         // ✅ CRÍTICO: Usar preferred_place_id en lugar de place_id
         // Este parámetro le dice a iNaturalist que incluya establishment status para ese lugar
         $defaultParams = array_merge($this->getDefaultParams(), [
-            'preferred_place_id' => 7196, // Colombia - ESTO es lo que faltaba
+            'preferred_place_id' => config('services.inaturalist.preferred_place_id', 7196), // Colombia - ESTO es lo que faltaba
             'locale' => 'es',
         ], $params);
 
@@ -75,7 +75,7 @@ class INaturalistService extends BaseApiService
             'params' => $defaultParams
         ]);
 
-        $response = $this->makeRequest('get', "/v1/taxa/{$id}", $defaultParams);
+        $response = $this->makeRequest('get', "/taxa/{$id}", $defaultParams);
         
         if (!$response['success']) {
             return $response;
@@ -132,7 +132,7 @@ class INaturalistService extends BaseApiService
         
         // ✅ CRÍTICO: Usar preferred_place_id para obtener establishment status
         $colombiaParams = [
-            'preferred_place_id' => 7196,  // Colombia - esto es lo importante
+            'preferred_place_id' => config('services.inaturalist.preferred_place_id', 7196),  // Colombia - esto es lo importante
             'locale' => 'es',
         ];
         
@@ -221,7 +221,7 @@ class INaturalistService extends BaseApiService
         $this->getDefaultParams(),
         [
             'taxon_id' => $taxonId,
-            'place_id' => $params['place_id'] ?? 7196,  // Colombia por defecto
+            'place_id' => $params['place_id'] ?? config('services.inaturalist.place_id', 7196),  // Colombia por defecto
             'per_page' => $params['per_page'] ?? 100,
             'order_by' => $params['order_by'] ?? 'created_at',
             'order' => $params['order'] ?? 'desc',
@@ -235,59 +235,46 @@ class INaturalistService extends BaseApiService
     // Limpiar nulos/vacíos
     $defaultParams = array_filter($defaultParams, fn($value) => $value !== null && $value !== '');
 
-    $cacheKey = "observations_{$taxonId}_" . md5(json_encode($defaultParams));
-    return Cache::remember($cacheKey, 3600, function () use ($defaultParams, $taxonId) {  // 1h TTL
-        $logUrl = $this->config['base_url'] . '/v1/observations?' . http_build_query($defaultParams);  // URL para log
-        Log::info('🔍 Params para getTaxonObservations', ['url' => $logUrl, 'params' => $defaultParams]);
+    $logUrl = $this->config['base_url'] . '/observations?' . http_build_query($defaultParams);
+    Log::info('🔍 Params para getTaxonObservations', ['url' => $logUrl, 'params' => $defaultParams]);
 
+    $response = $this->makeRequest('get', '/observations', $defaultParams, true);
+
+    if (!$response['success']) {
+        Log::error('Error en getTaxonObservations', ['error' => $response['error'] ?? 'unknown']);
+        return $response;
+    }
+
+    $rawResults = $response['data']['results'] ?? [];
+    Log::info('🔍 DEBUG getTaxonObservations - Estructura', [
+        'total_results' => $response['data']['total_results'] ?? 0,
+        'results_count' => count($rawResults),
+        'first_result_keys' => !empty($rawResults) ? array_keys($rawResults[0]) : [],
+    ]);
+
+    // Normalizar observaciones
+    $normalizedResults = [];
+    foreach ($rawResults as $index => $obs) {
         try {
-            // FIX: Path con /v1/ para endpoint correcto
-            $response = $this->makeRequest('get', '/v1/observations', $defaultParams, true);
-
-            if (!$response['success']) {
-                Log::error('Error en getTaxonObservations', ['status' => $response['status'] ?? 'unknown']);
-                return $response;
-            }
-
-            $rawResults = $response['data']['results'] ?? [];
-            Log::info('🔍 DEBUG getTaxonObservations - Estructura', [
-                'total_results' => $response['data']['total_results'] ?? 0,
-                'results_count' => count($rawResults),
-                'first_result_keys' => !empty($rawResults) ? array_keys($rawResults[0]) : [],
-            ]);
-
-            // Normalizar observaciones
-            $normalizedResults = [];
-            foreach ($rawResults as $index => $obs) {
-                try {
-                    $normalized = $this->normalizeObservationData($obs);
-                    $normalizedResults[] = $normalized;
-                } catch (\Exception $e) {
-                    Log::error("💥 Error normalizando observación {$index}", ['error' => $e->getMessage()]);
-                    continue;
-                }
-            }
-
-            return [
-                'success' => true,
-                'data' => $normalizedResults,
-                'pagination' => [
-                    'page' => $response['data']['page'] ?? 1,
-                    'per_page' => $response['data']['per_page'] ?? 100,
-                    'total' => $response['data']['total_results'] ?? count($normalizedResults),
-                ],
-                'cached' => false,
-                'api' => $this->apiName ?? 'inaturalist',
-            ];
+            $normalized = $this->normalizeObservationData($obs);
+            $normalizedResults[] = $normalized;
         } catch (\Exception $e) {
-            Log::error('Excepción en getTaxonObservations', ['error' => $e->getMessage()]);
-            return [
-                'success' => false,
-                'error' => ['message' => 'Error interno al obtener observaciones', 'code' => 500],
-                'cached' => false,
-            ];
+            Log::error("💥 Error normalizando observación {$index}", ['error' => $e->getMessage()]);
+            continue;
         }
-    });
+    }
+
+    return [
+        'success' => true,
+        'data' => $normalizedResults,
+        'pagination' => [
+            'page' => $response['data']['page'] ?? 1,
+            'per_page' => $response['data']['per_page'] ?? 100,
+            'total' => $response['data']['total_results'] ?? count($normalizedResults),
+        ],
+        'cached' => $response['cached'] ?? false,
+        'api' => $this->apiName,
+    ];
 }
     
     /**
@@ -358,7 +345,7 @@ class INaturalistService extends BaseApiService
             $params = $this->cleanParams($params);
             
             // Realizar la petición a la API de iNaturalist
-            $response = $this->makeRequest('get', '/v1/observations', $params, true);
+            $response = $this->makeRequest('get', '/observations', $params, true);
             
             if (!$response['success']) {
                 Log::error('Error en la API de iNaturalist', [
@@ -407,8 +394,77 @@ class INaturalistService extends BaseApiService
             ];
         }
     }
-    
-    
+
+    /**
+     * Obtiene contadores de especies (lista de especies) para una ubicación y filtros dados.
+     * Endpoint: /observations/species_counts
+     * 
+     * @param array $params
+     * @return array
+     */
+    public function getSpeciesCounts(array $params = []): array
+    {
+        $defaultParams = array_merge($this->getDefaultParams(), [
+            'per_page' => 24,
+            'page' => 1,
+            'hrank' => 'species', // Highest rank species
+            'lrank' => 'species', // Lowest rank species (only species)
+            'verifiable' => 'true',
+            'quality_grade' => 'research', // Filter high quality data
+            'photos' => 'true',
+            'place_id' => config('services.inaturalist.place_id', 7196) // Default Colombia
+        ], $params);
+
+        // Map 'q' to 'q' (generic search) or handle if necessary. 
+        // Note: species_counts supports 'taxon_id' but 'q' might search within species names if supported by iNat.
+        // iNat API for species_counts DOES NOT strictly support 'q' for species name search in the same way as /taxa.
+        // It relies more on 'taxon_id' filter. 
+        // However, we will pass whatever params we have.
+
+        // Clean params
+        $params = array_filter($defaultParams, function($value) {
+            return $value !== null && $value !== '';
+        });
+
+        Log::info('🔍 Params para getSpeciesCounts', [
+            'params' => $params
+        ]);
+
+        $response = $this->makeRequest('get', '/observations/species_counts', $params, true);
+
+        if (!$response['success']) {
+            return $response;
+        }
+
+        $rawResults = $response['data']['results'] ?? [];
+        $normalizedResults = [];
+
+        foreach ($rawResults as $result) {
+            // Result structure is { count: X, taxon: { ... } }
+            if (isset($result['taxon'])) {
+                try {
+                    $taxon = $this->normalizeTaxonData($result['taxon']);
+                    // Inject observation count from this endpoint if useful
+                    $taxon['observations_count'] = $result['count'] ?? 0; 
+                    $normalizedResults[] = $taxon;
+                } catch (\Exception $e) {
+                    continue;
+                }
+            }
+        }
+
+        return [
+            'success' => true,
+            'data' => $normalizedResults,
+            'pagination' => [
+                'page' => $response['data']['page'] ?? 1,
+                'per_page' => $response['data']['per_page'] ?? $params['per_page'],
+                'total' => $response['data']['total_results'] ?? count($normalizedResults),
+            ],
+            'cached' => $response['cached'] ?? false,
+            'api' => $this->apiName,
+        ];
+    }
     /**
      * Obtiene información general sobre la API de iNaturalist
      *
@@ -459,25 +515,29 @@ class INaturalistService extends BaseApiService
                 $taxonData['conservation_statuses'] ?? 
                 null
             ),
-            'conservation_statuses' => $taxonData['conservation_statuses'] ?? [],
+            // OPTIMIZACIÓN: No guardar array completo de conservation_statuses si no es necesario
+            // 'conservation_statuses' => $taxonData['conservation_statuses'] ?? [],
             
-            // ✅ NUEVO: Listed taxa (útil para verificar establishment)
-            'listed_taxa' => $taxonData['listed_taxa'] ?? [],
-            'listed_taxa_count' => $taxonData['listed_taxa_count'] ?? 0,
+            // ✅ NUEVO: Listed taxa (optimizado) - solo guardamos contadores o lo mínimo si es necesario
+            // Para ahorrar espacio, no guardamos el array completo a menos que sea crítico
+            'listed_taxa_count' => $taxonData['listed_taxa_count'] ?? count($taxonData['listed_taxa'] ?? []),
             
             'wikipedia_url' => $taxonData['wikipedia_url'] ?? null,
             'wikipedia_summary' => $taxonData['wikipedia_summary'] ?? null,
             'default_photo' => $this->extractPhotoData($taxonData['default_photo'] ?? null),
-            'taxon_schemes' => $taxonData['taxon_schemes'] ?? [],
-            'taxon_changes_count' => $taxonData['taxon_changes_count'] ?? 0,
-            'taxon_schemes_count' => $taxonData['taxon_schemes_count'] ?? 0,
+            
+            // OPTIMIZACIÓN: Eliminados taxon_schemes, taxon_changes, etc.
             'observations_count' => $taxonData['observations_count'] ?? 0,
-            'universal_search_rank' => $taxonData['universal_search_rank'] ?? null,
+            
             'iconic_taxon_id' => $taxonData['iconic_taxon_id'] ?? null,
             'iconic_taxon_name' => $taxonData['iconic_taxon_name'] ?? null,
             'preferred_common_name' => $taxonData['preferred_common_name'] ?? null,
+            
+            // ✅ NUEVO: Galería optimizada (Top 5 fotos de taxon_photos)
+            'gallery' => $this->extractGallery($taxonData['taxon_photos'] ?? []),
+            
             'ancestors' => $this->extractAncestors($taxonData['ancestors'] ?? []),
-            'taxon_photos' => $this->extractTaxonPhotos($taxonData['taxon_photos'] ?? []),
+            
             'created_at' => $taxonData['created_at'] ?? null,
             'updated_at' => $taxonData['updated_at'] ?? null,
             'source' => 'inaturalist',
@@ -706,6 +766,39 @@ protected function getConservationStatusName(?string $status): ?string
     }
     
     /**
+     * Extrae y procesa la galería de fotos (max 5 mejores)
+     *
+     * @param array $taxonPhotos
+     * @return array
+     */
+    protected function extractGallery(array $taxonPhotos): array
+    {
+        if (empty($taxonPhotos)) {
+            return [];
+        }
+
+        // 1. Filtrar y Normalizar
+        $gallery = [];
+        foreach ($taxonPhotos as $tp) {
+            $photo = $tp['photo'] ?? null;
+            if (!$photo) continue;
+
+            $gallery[] = [
+                'id' => $photo['id'] ?? null,
+                'url' => $photo['original_url'] ?? $photo['large_url'] ?? $photo['medium_url'] ?? $photo['url'],
+                'medium_url' => $photo['medium_url'] ?? $photo['url'],
+                'small_url' => $photo['small_url'] ?? $photo['square_url'] ?? $photo['url'],
+                'attribution' => $photo['attribution'] ?? null,
+                'license_code' => $photo['license_code'] ?? null,
+                'original_dimensions' => $photo['original_dimensions'] ?? null,
+            ];
+        }
+
+        // 2. Limitar a 5 fotos
+        return array_slice($gallery, 0, 5);
+    }
+
+    /**
      * Extrae el nombre de un lugar a partir de una cadena de ubicación
      *
      * @param string $placeString
@@ -721,71 +814,6 @@ protected function getConservationStatusName(?string $status): ?string
         return trim($parts[0]);
     }
     
-    /**
-     * Realiza una petición a la API de iNaturalist
-     *
-     * @param string $method
-     * @param string $endpoint
-     * @param array $params
-     * @param bool $cache
-     * @return array
-     */
-    protected function makeRequest(string $method, string $endpoint, array $params = [], bool $cache = true): array
-    {
-        try {
-            $client = new \GuzzleHttp\Client([
-                'base_uri' => $this->config['base_url'],
-                'timeout' => $this->config['timeout'] ?? 30,
-                'verify' => false, // Solo para desarrollo, en producción debería ser true
-            ]);
-            
-            $options = [
-                'query' => strtolower($method) === 'get' ? $params : [],
-                'form_params' => strtolower($method) === 'post' ? $params : [],
-                'headers' => [
-                    'Accept' => 'application/json',
-                    'Content-Type' => 'application/json',
-                ],
-            ];
-            
-            // Agregar autenticación si está configurada
-            if (!empty($this->config['api_key'] ?? null)) {
-                $options['headers']['Authorization'] = 'Bearer ' . $this->config['api_key'];
-            }
-            
-            $response = $client->request(strtoupper($method), ltrim($endpoint, '/'), $options);
-            
-            $statusCode = $response->getStatusCode();
-            $body = json_decode((string) $response->getBody(), true);
-            
-            if ($statusCode >= 200 && $statusCode < 300) {
-                return [
-                    'success' => true,
-                    'data' => $body,
-                    'cached' => false,
-                ];
-            }
-            
-            return [
-                'success' => false,
-                'error' => [
-                    'message' => $body['error'] ?? 'Error en la petición a la API de iNaturalist',
-                    'code' => $statusCode,
-                ],
-                'cached' => false,
-            ];
-            
-        } catch (\Exception $e) {
-            return [
-                'success' => false,
-                'error' => [
-                    'message' => $e->getMessage(),
-                    'code' => $e->getCode(),
-                ],
-                'cached' => false,
-            ];
-        }
-    }
 
 
 }

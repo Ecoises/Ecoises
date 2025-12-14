@@ -34,7 +34,7 @@ class TaxonController extends Controller
             'per_page' => 'sometimes|integer|min:1|max:100',
             'page' => 'sometimes|integer|min:1',
             'rank' => 'sometimes|string|in:species,genus,family,order,class,phylum,kingdom',
-            'enrich' => 'sometimes|boolean',  // ← Agregado para consistencia
+            'enrich' => 'sometimes',  // ← Agregado para consistencia
         ]);
         
         $filters = $request->only(['per_page', 'page', 'rank', 'enrich']);
@@ -78,7 +78,7 @@ class TaxonController extends Controller
             'per_page' => 'sometimes|integer|min:1|max:100',
             'page' => 'sometimes|integer|min:1',
             'rank' => 'sometimes|string|in:species,genus,family,order,class,phylum,kingdom',
-            'enrich' => 'sometimes|boolean',
+            'enrich' => 'sometimes',
         ]);
         
         $query = $request->input('q');
@@ -125,8 +125,8 @@ class TaxonController extends Controller
     public function show($id, Request $request)
     {
         $request->validate([
-            'refresh' => 'sometimes|boolean',
-            'enrich' => 'sometimes|boolean',
+            'refresh' => 'sometimes',
+            'enrich' => 'sometimes',
         ]);
         
         $forceRefresh = $request->boolean('refresh', false);
@@ -198,6 +198,59 @@ class TaxonController extends Controller
     }
     
     /**
+     * Lista especies de Colombia para exploración
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function exploreColombiaSpecies(Request $request)
+    {
+        $request->validate([
+            'per_page' => 'sometimes|integer|min:1|max:100',
+            'page' => 'sometimes|integer|min:1',
+            'q' => 'sometimes|string|max:255',
+            'rank' => 'sometimes|string',
+            'native' => 'sometimes',
+            'endemic' => 'sometimes',
+            'threatened' => 'sometimes',
+            'enrich' => 'sometimes',
+        ]);
+
+        // Obtener parámetros de la solicitud
+        $params = $request->only(['per_page', 'page', 'q', 'rank', 'native', 'endemic', 'threatened', 'enrich']);
+
+        // Obtener las especies de Colombia
+        $result = $this->taxonService->getColombiaSpecies($params);
+
+        if (!$result['success']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['error']['message'] ?? 'Error al obtener las especies de Colombia',
+                'code' => $result['error']['code'] ?? 500,
+                'data' => null,
+            ], $result['error']['code'] ?? 500);
+        }
+
+        // ← Fix: Enriquecer si se pide (manejar array vs collection)
+        $shouldEnrich = $request->boolean('enrich', true);
+        $data = $shouldEnrich ? collect($result['data'])->map(function ($item) {
+             return is_array($item) ? $item : $item->enriched_data;
+        }) : $result['data'];
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Especies de Colombia obtenidas correctamente',
+            'data' => $data,
+            'meta' => [
+                'source' => $result['source'] ?? 'api',
+                'cached' => $result['cached'] ?? false,
+                'pagination' => $result['pagination'] ?? null,
+                'location' => 'Colombia'
+            ],
+        ]);
+    }
+
+    /**
      * Lista especies cercanas a la ubicación del usuario
      *
      * @param Request $request
@@ -211,15 +264,15 @@ class TaxonController extends Controller
             'order_by' => 'sometimes|string|in:observations_count,created_at,observed_on',
             'order' => 'sometimes|string|in:asc,desc',
             'rank' => 'sometimes|string|in:species,genus,family',
-            'enrich' => 'sometimes|boolean',  // ← Agregado para consistencia
+            'enrich' => 'sometimes',  // ← Agregado para consistencia
         ]);
-        
+
         // Obtener parámetros de la solicitud
         $params = $request->only(['per_page', 'page', 'order_by', 'order', 'rank', 'enrich']);
-        
+
         // Obtener las especies cercanas a la ubicación
         $result = $this->taxonService->getPlaceObservations($params);
-        
+
         if (!$result['success']) {
             return response()->json([
                 'success' => false,
@@ -232,7 +285,7 @@ class TaxonController extends Controller
         // ← Fix: Enriquecer si se pide
         $shouldEnrich = $request->boolean('enrich', true);
         $data = $shouldEnrich ? collect($result['data'])->map->enriched_data->toArray() : $result['data'];
-        
+
         // Construir la respuesta con metadatos de ubicación si están disponibles
         $response = [
             'success' => true,
@@ -244,12 +297,12 @@ class TaxonController extends Controller
                 'pagination' => $result['pagination'] ?? null,
             ]
         ];
-        
+
         // Agregar información de ubicación si está disponible
         if (isset($result['location'])) {
             $response['meta']['location'] = $result['location'];
         }
-        
+
         return response()->json($response);
     }
     
@@ -408,5 +461,39 @@ class TaxonController extends Controller
                 'data' => null,
             ], 500);
         }
+    }
+    /**
+     * Obtener especies relacionadas
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function related($id)
+    {
+        $result = $this->taxonService->getRelatedSpecies($id);
+
+        if (!$result['success']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['error'] ?? 'Error al obtener especies relacionadas',
+                'data' => [],
+            ], 200); // Retornamos 200 con array vacío para no romper el frontend
+        }
+
+        // Enriquecer datos (usar enriched_data para fotos, etc.)
+        $data = collect($result['data'])->map(function($taxon) {
+            // Si es un modelo, enriquecer. Si es array de API, normalizar la galería.
+            if ($taxon instanceof \App\Models\Taxa) {
+                return $taxon->enriched_data;
+            }
+            // Si viene directo de la API (array), ya debería estar medio listo,
+            // pero nos aseguramos de que tenga 'gallery' si INaturalistService lo puso.
+            return $taxon; 
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
     }
 }

@@ -19,12 +19,12 @@ Route::post('reset-password', [AuthController::class, 'resetPassword']);
 Route::prefix('taxa')->group(function () {
     Route::get('/', [TaxonController::class, 'index']); // Listar todos los taxones
     Route::get('/search', [TaxonController::class, 'search']); // Buscar taxones
+    Route::get('/explore/colombia', [TaxonController::class, 'exploreColombiaSpecies']); // Explorar especies de Colombia
     Route::get('/{id}', [TaxonController::class, 'show']); // Obtener un taxón por ID
     Route::get('/observations/{taxonId}', [TaxonController::class, 'observations'])->name('taxa.observations'); // Obtener observaciones de un taxón
     Route::post('/{taxon}/sync-observations', [TaxonController::class, 'syncObservations']); // Sincronizar observaciones de un taxón
-    
-    // Endpoint para listar especies por lugar
-    Route::get('/place/species', [TaxonController::class, 'listSpeciesByPlace']); // Listar especies de un lugar específico
+    Route::get('/{id}/related', [TaxonController::class, 'related']); // Especies relacionadas
+     // Listar especies de un lugar específico
 });
 
 

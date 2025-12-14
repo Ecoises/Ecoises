@@ -77,7 +77,10 @@ class Taxa extends Model
             'wikipedia_url' => $apiData['wikipedia_url'] ?? null,
             'default_photo' => $apiData['default_photo'] ?? null,
             'observations_count_api' => $apiData['observations_count'] ?? 0,
+            'observations_count_api' => $apiData['observations_count'] ?? 0,
             'ancestry_full' => $apiData['ancestry'] ?? null,
+            // ✅ NUEVO: Exponer galería si existe en la data cacheada
+            'gallery' => $apiData['gallery'] ?? [],
         ]);
 
         // Extraer status de establecimiento directamente de los datos de la API

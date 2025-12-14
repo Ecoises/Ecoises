@@ -119,6 +119,7 @@ abstract class BaseApiService implements ApiServiceInterface
     {
         $headers = [
             'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
             'User-Agent' => 'BiodiversidadAPI/1.0',
         ];
         

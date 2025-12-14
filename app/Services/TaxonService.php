@@ -106,6 +106,8 @@ class TaxonService
                 'rank' => 'species', // Solo especies (no géneros, familias, etc.)
                 'is_active' => 'true', // Solo especies activas
                 'per_page' => $filters['per_page'] ?? 15,
+                // OPTIMIZACIÓN: No pedir identificaciones
+                'identifications' => 'false', 
             ]));
             
             if (!$apiResult['success']) {
@@ -133,7 +135,15 @@ class TaxonService
             }
             
             // Enriquecer con datos unidos
-            $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
+            // OPTIMIZACIÓN: En la lista solo mandamos default_photo, NO la galería completa
+            $formattedTaxa = collect($savedTaxa)->map(function($taxon) {
+                $data = $taxon->enriched_data;
+                // Eliminamos datos pesados para la lista
+                unset($data['gallery']);
+                unset($data['ancestors']);
+                unset($data['conservation_statuses']);
+                return $data;
+            })->toArray();
             
             return [
                 'success' => true,
@@ -426,7 +436,12 @@ class TaxonService
             
             foreach ($taxa as $taxon) {
                 if (is_array($taxon)) {
-                    $normalizedSpecies[] = $this->normalizeTaxonData($taxon);
+                    $normalized = $this->normalizeTaxonData($taxon);
+                    // OPTIMIZACIÓN: Eliminamos datos pesados para la lista de cercanos
+                    unset($normalized['gallery']);
+                    unset($normalized['ancestors']);
+                    unset($normalized['conservation_statuses']);
+                    $normalizedSpecies[] = $normalized;
                 }
             }
             
@@ -462,6 +477,73 @@ class TaxonService
                 'source' => 'api',
             ];
         }
+    }
+
+    /**
+     * Obtiene especies relacionadas (mismo género/familia)
+     *
+     * @param int $taxonId
+     * @return array
+     */
+    public function getRelatedSpecies(int $taxonId): array
+    {
+        // 1. Obtener el taxón base para saber su género
+        $baseTaxon = $this->getTaxonById($taxonId);
+        
+        if (!$baseTaxon['success']) {
+            return ['success' => false, 'error' => 'Taxón base no encontrado'];
+        }
+
+        $taxonData = $baseTaxon['data']->enriched_data ?? $baseTaxon['data'];
+        
+        // 2. Extraer ID del ancestro (Género o Familia)
+        // Intentamos buscar el género en el ancestry
+        $ancestors = $taxonData['ancestors'] ?? [];
+        $genusId = null;
+        
+        foreach ($ancestors as $ancestor) {
+            if (isset($ancestor['rank']) && $ancestor['rank'] === 'genus') {
+                $genusId = $ancestor['id'];
+                break;
+            }
+        }
+        
+        // Si no encontramos género, usar familia o fallback
+        if (!$genusId && !empty($ancestors)) {
+            // Usar el ancestro inmediato anterior (padre)
+            $parent = end($ancestors);
+            $genusId = $parent['id'] ?? null;
+        }
+
+        if (!$genusId) {
+            return ['success' => false, 'data' => []];
+        }
+
+        // 3. Buscar especies hermanas en iNaturalist
+        $params = [
+            'taxon_id' => $genusId, // Buscar dentro de este ancestro
+            'rank' => 'species',
+            'per_page' => 6, // 5 + 1 (por si sale el mismo)
+            'order_by' => 'observations_count',
+            'order' => 'desc',
+            'photos' => 'true', 
+        ];
+
+        $relatedResult = $this->iNaturalistService->searchTaxon('', $params);
+        
+        if (!$relatedResult['success']) {
+            return ['success' => false, 'data' => []];
+        }
+
+        // 4. Filtrar el taxón actual de los resultados
+        $relatedTaxa = array_filter($relatedResult['data'], function($t) use ($taxonId) {
+            return $t['id'] != $taxonId;
+        });
+
+        return [
+            'success' => true,
+            'data' => array_values(array_slice($relatedTaxa, 0, 5))
+        ];
     }
     
     /**
@@ -584,8 +666,8 @@ class TaxonService
             $taxon->genus = $ancestry['genus'] ?? null;
             $taxon->species = $ancestry['species'] ?? null;
 
-            // Fetch status específico de Colombia (place_id=7196)
-            $colombiaStatus = $this->getEstablishmentStatusForColombia($taxonData['id'] ?? null);
+            // Fetch status específico (place_id configurado)
+            $colombiaStatus = $this->getEstablishmentStatus($taxonData['id'] ?? null);
             $flags = $this->mapEstablishmentMeans($colombiaStatus);
             $taxon->is_native = $flags['is_native'];
             $taxon->is_endemic = $flags['is_endemic'];
@@ -609,10 +691,10 @@ class TaxonService
     }
 
     /**
-     * Obtiene status de establecimiento para un taxón en Colombia (place_id=7196)
+     * Obtiene status de establecimiento para un taxón en el lugar configurado
      * Cachea por 24h para evitar llamadas repetidas.
      */
-   public function getEstablishmentStatusForColombia(?string $taxonId): ?string
+   public function getEstablishmentStatus(?string $taxonId): ?string
     {
         if (!$taxonId) {
             return null;
@@ -632,7 +714,7 @@ class TaxonService
         try {
             // ✅ CRÍTICO: Usar preferred_place_id en lugar de place_id
             $response = $this->iNaturalistService->getTaxonById($taxonId, [
-                'preferred_place_id' => 7196,  // Esto es lo que faltaba
+                'preferred_place_id' => config('services.inaturalist.preferred_place_id', 7196),  // Esto es lo que faltaba
                 'locale' => 'es'
             ]);
 
@@ -742,10 +824,11 @@ public function extractEstablishmentStatusFromApiData(array $apiData): array
         }
     }
 
-    // MÉTODO 3: listed_taxa (buscar Colombia place_id=7196)
+    // MÉTODO 3: listed_taxa (buscar place_id configurado)
     if (isset($apiData['listed_taxa']) && is_array($apiData['listed_taxa'])) {
+        $targetPlaceId = config('services.inaturalist.preferred_place_id', 7196);
         foreach ($apiData['listed_taxa'] as $listedTaxon) {
-            if (isset($listedTaxon['place']['id']) && $listedTaxon['place']['id'] == 7196) {
+            if (isset($listedTaxon['place']['id']) && $listedTaxon['place']['id'] == $targetPlaceId) {
                 $status = $listedTaxon['establishment_means'] ?? null;
                 if ($status) {
                     Log::info('✅ Status de listed_taxa (Colombia)', ['status' => $status]);
@@ -1045,6 +1128,169 @@ public function mapEstablishmentMeans(?string $status): array
     }
     
     /**
+     * Obtiene especies de Colombia para exploración
+     * Cachea el resultado por 30 minutos para optimizar rendimiento
+     *
+     * @param array $filters
+     * @return array
+     */
+    public function getColombiaSpecies(array $filters = []): array
+    {
+        // Crear clave de caché basada en los filtros
+        $cacheKey = 'colombia_species_' . md5(json_encode($filters));
+
+        return Cache::remember($cacheKey, 1800, function () use ($filters) { // 30 minutos
+            try {
+                // Buscar especies populares de Colombia con fotos
+                // Aseguramos que place_id esté presente para filtrar por Colombia
+                // Aseguramos que place_id esté presente para filtrar por Colombia
+                $placeId = config('services.inaturalist.place_id', 7196);
+                
+                $apiFilters = array_merge($filters, [
+                    'place_id' => $placeId,
+                    'order_by' => 'observations_count',
+                    'order' => 'desc',
+                    'has' => ['photos'],
+                    'rank' => 'species',
+                    'is_active' => 'true',
+                    'per_page' => $filters['per_page'] ?? 24, // Agnostic default, controller/frontend controls it
+                    'page' => $filters['page'] ?? 1,
+                ]);
+
+                // Force place_id again in case $filters overwrote it
+                $apiFilters['place_id'] = $placeId;
+
+                // Mapear filtros de frontend a API de iNaturalist
+                if (isset($filters['native']) && $filters['native']) $apiFilters['native'] = 'true';
+                if (isset($filters['endemic']) && $filters['endemic']) $apiFilters['endemic'] = 'true';
+                if (isset($filters['threatened']) && $filters['threatened']) $apiFilters['threatened'] = 'true';
+                // Map common class names to their iNaturalist Taxon IDs for better filtering
+                $classMap = [
+                    'Aves' => 3,
+                    'Mammalia' => 40151,
+                    'Reptilia' => 26036,
+                    'Amphibia' => 20978,
+                    'Insecta' => 47158,
+                    'Plantae' => 47126,
+                    'Fungi' => 47170
+                ];
+
+                if (isset($filters['rank']) && $filters['rank'] !== 'Todas') {
+                     if (isset($classMap[$filters['rank']])) {
+                         $apiFilters['taxon_id'] = $classMap[$filters['rank']];
+                     } else {
+                         // Fallback for unmapped or generic search
+                         if (empty($filters['q'])) {
+                             $apiFilters['q'] = $filters['rank']; // Only use rank as query if no q is present
+                         }
+                     }
+                }
+
+                $query = $filters['q'] ?? '';
+
+                // Use getSpeciesCounts (observations/species_counts) instead of searchTaxon (taxa)
+                // This correctly filters regular species lists by place_id.
+                // searchTaxon ignores place_id for filtering list (only used for establishment status).
+                
+                // If we have a generic text query ('q'), we might still want searchTaxon IF we can't search by name in species_counts.
+                // But species_counts doesn't support 'q' well for name search.
+                // However, for "Exploring", species_counts is the correct endpoint.
+                
+                // If user is searching by name (`q` parameter is present and not empty), we might have a tradeoff.
+                // iNat /observations/species_counts DOES NOT support `q` param for partial text search on species names.
+                // It supports `taxon_name` or `taxon_id`.
+                
+                // HYBRID APPROACH:
+                // 1. If 'q' is empty (Browsing/Exploring), use getSpeciesCounts -> returns top species in Colombia.
+                // 2. If 'q' is present, use searchTaxon (Global search, but filtered results are hard).
+                //    Wait, we want to search "Parrot in Colombia".
+                //    The correct way is: searchTaxon first to get Candidate Taxa IDs, then filter those by presence in Colombia? That's too heavy.
+                //    OR use /observations?q=parrot&place_id=7196&per_page=0&return_bounds=true... no.
+                
+                // Let's stick to getSpeciesCounts for Browsing.
+                // For Search ('q' is present), we rely on `searchTaxon` which is what we used before.
+                // BUT user says "Global species appear".
+                // If 'q' is empty, we MUST use getSpeciesCounts to show top Colombia species.
+                
+                if (empty($filters['q'])) {
+                    $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
+                } else {
+                    // Search is active. iNat /taxa endpoint (searchTaxon) doesn't filter by place.
+                    // To search species IN Colombia, we technically should search:
+                    // /observations/species_counts?place_id=7196&q=Parrot ?? No, q not supported.
+                    // We can use `taxon_name` param in species_counts!
+                    
+                    if (isset($apiFilters['q'])) {
+                        $apiFilters['taxon_name'] = $apiFilters['q'];
+                        // unset($apiFilters['q']); // Keep it if method needs it for logging, but mapped above.
+                    }
+                    
+                    $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
+                }
+
+                if (!$apiResult['success']) {
+                    Log::error('Error al obtener especies de Colombia', [
+                        'filters' => $filters,
+                        'error' => $apiResult['error'] ?? 'Error desconocido'
+                    ]);
+
+                    return [
+                        'success' => false,
+                        'error' => $apiResult['error'] ?? ['message' => 'Error al obtener especies de Colombia'],
+                        'source' => 'api',
+                    ];
+                }
+
+                // Procesar y guardar los resultados
+                $savedTaxa = [];
+                if (isset($apiResult['data']) && is_array($apiResult['data'])) {
+                    foreach ($apiResult['data'] as $taxonData) {
+                        $savedTaxon = $this->createOrUpdateTaxonFromApiData($taxonData);
+                        if ($savedTaxon) {
+                            $savedTaxa[] = $savedTaxon;
+                        }
+                    }
+                }
+
+                // Enriquecer con datos unidos
+                $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
+
+                $pagination = $apiResult['pagination'] ?? [
+                    'total' => count($formattedTaxa),
+                    'per_page' => $filters['per_page'] ?? 24,
+                    'page' => $filters['page'] ?? 1,
+                ];
+                
+                // Calculate last_page/total_pages
+                $perPage = $pagination['per_page'] ?? 24;
+                $total = $pagination['total'] ?? 0;
+                $pagination['last_page'] = $perPage > 0 ? (int)ceil($total / $perPage) : 1;
+                $pagination['current_page'] = $pagination['page'] ?? 1;
+
+                return [
+                    'success' => true,
+                    'data' => $formattedTaxa,
+                    'pagination' => $pagination,
+                    'cached' => true, // Indicar que viene del caché del servicio
+                    'source' => 'api',
+                ];
+
+            } catch (\Exception $e) {
+                Log::error('Excepción al obtener especies de Colombia: ' . $e->getMessage(), [
+                    'filters' => $filters,
+                    'trace' => $e->getTraceAsString()
+                ]);
+
+                return [
+                    'success' => false,
+                    'error' => ['message' => 'Error inesperado al obtener especies de Colombia: ' . $e->getMessage()],
+                    'source' => 'api',
+                ];
+            }
+        });
+    }
+
+    /**
      * Procesa y guarda las fotos de una observación
      *
      * @param \App\Models\Observation $observation
@@ -1062,7 +1308,7 @@ public function mapEstablishmentMeans(?string $status): array
                     'attribution' => $photoData['attribution'] ?? null,
                 ]
             );
-            
+
             // Aquí podrías agregar lógica para descargar y almacenar las imágenes localmente
             // si es necesario para tu aplicación
         }
