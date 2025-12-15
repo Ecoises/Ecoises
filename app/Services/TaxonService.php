@@ -1138,6 +1138,13 @@ public function mapEstablishmentMeans(?string $status): array
     {
         // Crear clave de caché basada en los filtros
         $cacheKey = 'colombia_species_' . md5(json_encode($filters));
+        
+        Log::info('TaxonService: getColombiaSpecies called', [
+            'filters' => $filters,
+            'cache_key' => $cacheKey,
+            'has_page' => isset($filters['page']),
+            'page_val' => $filters['page'] ?? 'not set'
+        ]);
 
         return Cache::remember($cacheKey, 1800, function () use ($filters) { // 30 minutos
             try {
