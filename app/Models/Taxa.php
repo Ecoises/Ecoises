@@ -69,18 +69,23 @@ class Taxa extends Model
 {
     $enriched = $this->toArray();
 
-    $ref = $this->apiReferences()->first();
+    $enriched = $this->toArray();
+    
+    // Usamos la propiedad (colección eager loaded) en vez del método (query)
+    // para aprovechar el eager loading del Service
+    $ref = $this->apiReferences->first();
     if ($ref && $ref->data) {
         $apiData = $ref->data;
         $enriched = array_merge($enriched, [
             'rank' => $apiData['rank'] ?? null,
             'wikipedia_url' => $apiData['wikipedia_url'] ?? null,
+            'wikipedia_summary' => $apiData['wikipedia_summary'] ?? null, // ✅ AGREGADO: Resumen
             'default_photo' => $apiData['default_photo'] ?? null,
             'observations_count_api' => $apiData['observations_count'] ?? 0,
-            'observations_count_api' => $apiData['observations_count'] ?? 0,
             'ancestry_full' => $apiData['ancestry'] ?? null,
-            // ✅ NUEVO: Exponer galería si existe en la data cacheada
             'gallery' => $apiData['gallery'] ?? [],
+            'ancestors' => $apiData['ancestors'] ?? [], // ✅ AGREGADO: Ancestros completos
+            'conservation_status_details' => $apiData['conservation_status'] ?? null, // ✅ AGREGADO: Detalles de conservación
         ]);
 
         // Extraer status de establecimiento directamente de los datos de la API

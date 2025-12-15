@@ -292,18 +292,102 @@ class TaxonService
             $localTaxon = Taxa::with(['apiReferences', 'observations'])->find($id);
             
             if ($localTaxon) {
-                return [
-                    'success' => true,
-                    'data' => $localTaxon,
-                    'source' => 'local',
-                ];
+                // VERIFICACIÓN DE CALIDAD DE DATOS (Auto-Upgrade)
+                // Si la data local es "lite" (viene de una lista y no tiene galería/detalles),
+                // forzamos una actualización para obtener la data completa.
+                $enrichedData = $localTaxon->enriched_data;
+                
+                $hasGallery = !empty($enrichedData['gallery']);
+                $hasAncestors = !empty($enrichedData['ancestors']); // Clave para taxonomía completa
+                $hasSummary = !empty($enrichedData['wikipedia_summary']);
+
+                // CRITERIO DE COMPLETITUD:
+                // Debe tener Ancestros (info taxonómica) Y (Galería O Resumen).
+                // Si falta info taxonómica O (falta foto y falta texto), consideramos incompleto.
+                $isComplete = $hasAncestors && ($hasGallery || $hasSummary);
+
+                Log::info('🧐 Verificando completitud de taxón local', [
+                    'id' => $id,
+                    'has_gallery' => $hasGallery, 
+                    'gallery_count' => count($enrichedData['gallery'] ?? []),
+                    'has_ancestors' => $hasAncestors,
+                    'has_summary' => $hasSummary,
+                    'is_complete' => $isComplete
+                ]);
+
+                // Si parece completo, devolvemos la data local.
+                if ($isComplete) {
+                    return [
+                        'success' => true,
+                        'data' => $localTaxon,
+                        'source' => 'local',
+                    ];
+                }
+                
+                // Si llegamos aquí, falta información.
+                Log::info('🔄 Actualizando taxón incompleto', [
+                    'id' => $id, 
+                    'missing' => [
+                        'gallery' => !$hasGallery,
+                        'ancestors' => !$hasAncestors,
+                        'summary' => !$hasSummary
+                    ]
+                ]);
             }
         }
         
-        // Si no se encontró localmente o se forzó la actualización, buscamos en la API
-        $apiResult = $this->iNaturalistService->getTaxonById((string)$id);
+        // PREPARAR ID PARA LA API
+        // El $id que recibimos es el ID LOCAL (PK de la tabla taxa).
+        // Para consultar a iNaturalist necesitamos el EXTERNAL ID (guardado en api_references).
+        $externalId = null;
+        
+        if (isset($localTaxon) && $localTaxon) {
+            $ref = $localTaxon->apiReferences->firstWhere('api_source', 'inaturalist');
+            $externalId = $ref ? $ref->external_id : null;
+        }
+
+        // Si no tenemos external ID (caso raro o primer acceso si lógica fuera mixta),
+        // no podemos consultar por ID directo a menos que asumamos que $id ES el external_id (peligroso).
+        // En este flujo, getTaxonById asume ID local. Si no hay external ID, quizás debamos buscar por nombre.
+        
+        $apiIdToQuery = $externalId;
+
+        if (!$apiIdToQuery) {
+            // Fallback: Si no hay referencia, y estamos forzando, quizás el usuario pasó un ID externo?
+            // O simplemente fallamos.
+            if (!$localTaxon) {
+                // Si no existe localmente, asumimos que $id PODRÍA ser un external ID (si la ruta lo permite)
+                // Pero lo seguro es que esta función espera ID local.
+                $apiIdToQuery = (string)$id; 
+            } else {
+                Log::error('❌ No se puede actualizar taxón: falta external_id', ['id' => $id]);
+                 return [
+                    'success' => true, // Retornar lo que tenemos aunque sea viejo
+                    'data' => $localTaxon,
+                    'source' => 'local_incomplete',
+                ];
+            }
+        }
+
+        Log::info('🌍 Consultando API iNaturalist', ['local_id' => $id, 'external_id' => $apiIdToQuery]);
+        
+        // Si no se encontró localmente o es incompleto, buscamos en la API
+        $apiResult = $this->iNaturalistService->getTaxonById($apiIdToQuery);
         
         if (!$apiResult['success']) {
+            // Si falla la API pero teníamos data local (aunque incompleta), devolvemos esa como fallback
+            if (isset($localTaxon) && $localTaxon) {
+                Log::warning('⚠️ API falló, usando data local incompleta como fallback', [
+                    'id' => $id,
+                    'error' => $apiResult['error'] ?? 'Unknown error'
+                ]);
+                return [
+                    'success' => true,
+                    'data' => $localTaxon,
+                    'source' => 'local_fallback',
+                ];
+            }
+
             return [
                 'success' => false,
                 'error' => $apiResult['error'] ?? ['message' => 'Error al obtener el taxón de la API'],
@@ -311,7 +395,7 @@ class TaxonService
             ];
         }
         
-        // Procesamos y guardamos el taxón de la API
+        // Procesamos y guardamos el taxón de la API (Esto actualiza la data existente)
         $savedTaxon = $this->createOrUpdateTaxonFromApiData($apiResult['data']);
         
         if (!$savedTaxon) {
@@ -1153,16 +1237,33 @@ public function mapEstablishmentMeans(?string $status): array
                 // Aseguramos que place_id esté presente para filtrar por Colombia
                 $placeId = config('services.inaturalist.place_id', 7196);
                 
+                $orderBy = $filters['order_by'] ?? 'observations_count';
+
                 $apiFilters = array_merge($filters, [
                     'place_id' => $placeId,
-                    'order_by' => 'observations_count',
+                    'order_by' => 'observations_count', // Default API sort
                     'order' => 'desc',
                     'has' => ['photos'],
                     'rank' => 'species',
                     'is_active' => 'true',
-                    'per_page' => $filters['per_page'] ?? 24, // Agnostic default, controller/frontend controls it
+                    'per_page' => $filters['per_page'] ?? 24, 
                     'page' => $filters['page'] ?? 1,
                 ]);
+
+                // LÓGICA DE ORDENAMIENTO ALEATORIO
+                // Si el usuario pide orden aleatorio, engañamos a la API pidiendo una página aleatoria
+                if ($orderBy === 'random') {
+                    // Ajustar rango de aleatoriedad según filtros (menos páginas si es muy específico)
+                    $maxPages = 200;
+                    if (isset($filters['endemic']) && $filters['endemic']) $maxPages = 20;
+                    if (isset($filters['threatened']) && $filters['threatened']) $maxPages = 15;
+                    if (isset($filters['rank']) && $filters['rank'] !== 'Todas') $maxPages = 50;
+
+                    $apiFilters['page'] = rand(1, $maxPages);
+                    // Mantenemos 'observations_count' para la API, pero saltemos a una página random
+                } else {
+                    $apiFilters['order_by'] = $orderBy; // Permitir otros ordenamientos si la API lo soporta
+                }
 
                 // Force place_id again in case $filters overwrote it
                 $apiFilters['place_id'] = $placeId;
