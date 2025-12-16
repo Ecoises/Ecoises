@@ -10,12 +10,14 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Auth\Passwords\CanResetPassword as CanResetPasswordTrait;
+use Filament\Models\Contracts\HasName;
+use Spatie\Permission\Traits\HasRoles;
 
 
-class User extends Authenticatable
+class User extends Authenticatable implements HasName
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable, hasApiTokens, CanResetPasswordTrait;
+    use HasFactory, Notifiable, hasApiTokens, CanResetPasswordTrait, HasRoles;
 
     /**
      * The attributes that are mass assignable.
@@ -87,5 +89,13 @@ class User extends Authenticatable
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class);
+    }
+    
+    public function getFilamentName(): string
+    {
+        // Usamos el campo 'full_name' que tienes en tu base de datos.
+        // El operador ?? 'Usuario' asegura que siempre devuelva un string
+        // en caso de que 'full_name' esté nulo en algún registro.
+        return $this->full_name ?? $this->email;
     }
 }
