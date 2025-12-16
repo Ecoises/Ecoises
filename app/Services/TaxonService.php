@@ -607,7 +607,7 @@ class TaxonService
         $params = [
             'taxon_id' => $genusId, // Buscar dentro de este ancestro
             'rank' => 'species',
-            'per_page' => 6, // 5 + 1 (por si sale el mismo)
+            'per_page' => 4, // 3 + 1 (por si sale el mismo)
             'order_by' => 'observations_count',
             'order' => 'desc',
             'photos' => 'true', 
@@ -626,7 +626,7 @@ class TaxonService
 
         return [
             'success' => true,
-            'data' => array_values(array_slice($relatedTaxa, 0, 5))
+            'data' => array_values(array_slice($relatedTaxa, 0, 3))
         ];
     }
     
@@ -1220,182 +1220,195 @@ public function mapEstablishmentMeans(?string $status): array
      */
     public function getColombiaSpecies(array $filters = []): array
     {
-        // Crear clave de caché basada en los filtros
-        $cacheKey = 'colombia_species_' . md5(json_encode($filters));
+        $orderBy = $filters['order_by'] ?? 'observations_count';
         
         Log::info('TaxonService: getColombiaSpecies called', [
             'filters' => $filters,
-            'cache_key' => $cacheKey,
-            'has_page' => isset($filters['page']),
-            'page_val' => $filters['page'] ?? 'not set'
+            'order_by' => $orderBy
         ]);
 
-        return Cache::remember($cacheKey, 1800, function () use ($filters) { // 30 minutos
-            try {
-                // Buscar especies populares de Colombia con fotos
-                // Aseguramos que place_id esté presente para filtrar por Colombia
-                // Aseguramos que place_id esté presente para filtrar por Colombia
-                $placeId = config('services.inaturalist.place_id', 7196);
-                
-                $orderBy = $filters['order_by'] ?? 'observations_count';
+        try {
+            // Si es modo aleatorio, usar la base de datos local
+            if ($orderBy === 'random') {
+                return $this->getRandomSpeciesFromDatabase($filters);
+            }
 
-                $apiFilters = array_merge($filters, [
-                    'place_id' => $placeId,
-                    'order_by' => 'observations_count', // Default API sort
-                    'order' => 'desc',
-                    'has' => ['photos'],
-                    'rank' => 'species',
-                    'is_active' => 'true',
-                    'per_page' => $filters['per_page'] ?? 24, 
-                    'page' => $filters['page'] ?? 1,
-                ]);
+            // Modo normal: usar API de iNaturalist
+            $placeId = config('services.inaturalist.place_id', 7196);
 
-                // LÓGICA DE ORDENAMIENTO ALEATORIO
-                // Si el usuario pide orden aleatorio, engañamos a la API pidiendo una página aleatoria
-                if ($orderBy === 'random') {
-                    // Ajustar rango de aleatoriedad según filtros (menos páginas si es muy específico)
-                    $maxPages = 200;
-                    if (isset($filters['endemic']) && $filters['endemic']) $maxPages = 20;
-                    if (isset($filters['threatened']) && $filters['threatened']) $maxPages = 15;
-                    if (isset($filters['rank']) && $filters['rank'] !== 'Todas') $maxPages = 50;
+            $apiFilters = array_merge($filters, [
+                'place_id' => $placeId,
+                'order_by' => 'observations_count',
+                'order' => 'desc',
+                'has' => ['photos'],
+                'rank' => 'species',
+                'is_active' => 'true',
+                'per_page' => $filters['per_page'] ?? 24, 
+                'page' => $filters['page'] ?? 1,
+            ]);
 
-                    $apiFilters['page'] = rand(1, $maxPages);
-                    // Mantenemos 'observations_count' para la API, pero saltemos a una página random
-                } else {
-                    $apiFilters['order_by'] = $orderBy; // Permitir otros ordenamientos si la API lo soporta
-                }
+            $apiFilters['place_id'] = $placeId;
 
-                // Force place_id again in case $filters overwrote it
-                $apiFilters['place_id'] = $placeId;
+            // Mapear filtros
+            if (isset($filters['native']) && $filters['native']) $apiFilters['native'] = 'true';
+            if (isset($filters['endemic']) && $filters['endemic']) $apiFilters['endemic'] = 'true';
+            if (isset($filters['threatened']) && $filters['threatened']) $apiFilters['threatened'] = 'true';
+            
+            $classMap = [
+                'Aves' => 3,
+                'Mammalia' => 40151,
+                'Reptilia' => 26036,
+                'Amphibia' => 20978,
+                'Insecta' => 47158,
+                'Plantae' => 47126,
+                'Fungi' => 47170
+            ];
 
-                // Mapear filtros de frontend a API de iNaturalist
-                if (isset($filters['native']) && $filters['native']) $apiFilters['native'] = 'true';
-                if (isset($filters['endemic']) && $filters['endemic']) $apiFilters['endemic'] = 'true';
-                if (isset($filters['threatened']) && $filters['threatened']) $apiFilters['threatened'] = 'true';
-                // Map common class names to their iNaturalist Taxon IDs for better filtering
-                $classMap = [
-                    'Aves' => 3,
-                    'Mammalia' => 40151,
-                    'Reptilia' => 26036,
-                    'Amphibia' => 20978,
-                    'Insecta' => 47158,
-                    'Plantae' => 47126,
-                    'Fungi' => 47170
-                ];
-
-                if (isset($filters['rank']) && $filters['rank'] !== 'Todas') {
-                     if (isset($classMap[$filters['rank']])) {
-                         $apiFilters['taxon_id'] = $classMap[$filters['rank']];
-                     } else {
-                         // Fallback for unmapped or generic search
-                         if (empty($filters['q'])) {
-                             $apiFilters['q'] = $filters['rank']; // Only use rank as query if no q is present
-                         }
+            if (isset($filters['rank']) && $filters['rank'] !== 'Todas') {
+                 if (isset($classMap[$filters['rank']])) {
+                     $apiFilters['taxon_id'] = $classMap[$filters['rank']];
+                 } else {
+                     if (empty($filters['q'])) {
+                         $apiFilters['q'] = $filters['rank'];
                      }
+                 }
+            }
+
+            if (empty($filters['q'])) {
+                $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
+            } else {
+                if (isset($apiFilters['q'])) {
+                    $apiFilters['taxon_name'] = $apiFilters['q'];
                 }
+                $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
+            }
 
-                $query = $filters['q'] ?? '';
-
-                // Use getSpeciesCounts (observations/species_counts) instead of searchTaxon (taxa)
-                // This correctly filters regular species lists by place_id.
-                // searchTaxon ignores place_id for filtering list (only used for establishment status).
-                
-                // If we have a generic text query ('q'), we might still want searchTaxon IF we can't search by name in species_counts.
-                // But species_counts doesn't support 'q' well for name search.
-                // However, for "Exploring", species_counts is the correct endpoint.
-                
-                // If user is searching by name (`q` parameter is present and not empty), we might have a tradeoff.
-                // iNat /observations/species_counts DOES NOT support `q` param for partial text search on species names.
-                // It supports `taxon_name` or `taxon_id`.
-                
-                // HYBRID APPROACH:
-                // 1. If 'q' is empty (Browsing/Exploring), use getSpeciesCounts -> returns top species in Colombia.
-                // 2. If 'q' is present, use searchTaxon (Global search, but filtered results are hard).
-                //    Wait, we want to search "Parrot in Colombia".
-                //    The correct way is: searchTaxon first to get Candidate Taxa IDs, then filter those by presence in Colombia? That's too heavy.
-                //    OR use /observations?q=parrot&place_id=7196&per_page=0&return_bounds=true... no.
-                
-                // Let's stick to getSpeciesCounts for Browsing.
-                // For Search ('q' is present), we rely on `searchTaxon` which is what we used before.
-                // BUT user says "Global species appear".
-                // If 'q' is empty, we MUST use getSpeciesCounts to show top Colombia species.
-                
-                if (empty($filters['q'])) {
-                    $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
-                } else {
-                    // Search is active. iNat /taxa endpoint (searchTaxon) doesn't filter by place.
-                    // To search species IN Colombia, we technically should search:
-                    // /observations/species_counts?place_id=7196&q=Parrot ?? No, q not supported.
-                    // We can use `taxon_name` param in species_counts!
-                    
-                    if (isset($apiFilters['q'])) {
-                        $apiFilters['taxon_name'] = $apiFilters['q'];
-                        // unset($apiFilters['q']); // Keep it if method needs it for logging, but mapped above.
-                    }
-                    
-                    $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
-                }
-
-                if (!$apiResult['success']) {
-                    Log::error('Error al obtener especies de Colombia', [
-                        'filters' => $filters,
-                        'error' => $apiResult['error'] ?? 'Error desconocido'
-                    ]);
-
-                    return [
-                        'success' => false,
-                        'error' => $apiResult['error'] ?? ['message' => 'Error al obtener especies de Colombia'],
-                        'source' => 'api',
-                    ];
-                }
-
-                // Procesar y guardar los resultados
-                $savedTaxa = [];
-                if (isset($apiResult['data']) && is_array($apiResult['data'])) {
-                    foreach ($apiResult['data'] as $taxonData) {
-                        $savedTaxon = $this->createOrUpdateTaxonFromApiData($taxonData);
-                        if ($savedTaxon) {
-                            $savedTaxa[] = $savedTaxon;
-                        }
-                    }
-                }
-
-                // Enriquecer con datos unidos
-                $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
-
-                $pagination = $apiResult['pagination'] ?? [
-                    'total' => count($formattedTaxa),
-                    'per_page' => $filters['per_page'] ?? 24,
-                    'page' => $filters['page'] ?? 1,
-                ];
-                
-                // Calculate last_page/total_pages
-                $perPage = $pagination['per_page'] ?? 24;
-                $total = $pagination['total'] ?? 0;
-                $pagination['last_page'] = $perPage > 0 ? (int)ceil($total / $perPage) : 1;
-                $pagination['current_page'] = $pagination['page'] ?? 1;
-
-                return [
-                    'success' => true,
-                    'data' => $formattedTaxa,
-                    'pagination' => $pagination,
-                    'cached' => true, // Indicar que viene del caché del servicio
-                    'source' => 'api',
-                ];
-
-            } catch (\Exception $e) {
-                Log::error('Excepción al obtener especies de Colombia: ' . $e->getMessage(), [
+            if (!$apiResult['success']) {
+                Log::error('Error al obtener especies de Colombia', [
                     'filters' => $filters,
-                    'trace' => $e->getTraceAsString()
+                    'error' => $apiResult['error'] ?? 'Error desconocido'
                 ]);
 
                 return [
                     'success' => false,
-                    'error' => ['message' => 'Error inesperado al obtener especies de Colombia: ' . $e->getMessage()],
+                    'error' => $apiResult['error'] ?? ['message' => 'Error al obtener especies de Colombia'],
                     'source' => 'api',
                 ];
             }
-        });
+
+            // Procesar y guardar los resultados
+            $savedTaxa = [];
+            if (isset($apiResult['data']) && is_array($apiResult['data'])) {
+                foreach ($apiResult['data'] as $taxonData) {
+                    $savedTaxon = $this->createOrUpdateTaxonFromApiData($taxonData);
+                    if ($savedTaxon) {
+                        $savedTaxa[] = $savedTaxon;
+                    }
+                }
+            }
+
+            $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
+
+            $pagination = $apiResult['pagination'] ?? [
+                'total' => count($formattedTaxa),
+                'per_page' => $filters['per_page'] ?? 24,
+                'page' => $filters['page'] ?? 1,
+            ];
+            
+            $perPage = $pagination['per_page'] ?? 24;
+            $total = $pagination['total'] ?? 0;
+            $pagination['last_page'] = $perPage > 0 ? (int)ceil($total / $perPage) : 1;
+            $pagination['current_page'] = $pagination['page'] ?? 1;
+
+            return [
+                'success' => true,
+                'data' => $formattedTaxa,
+                'pagination' => $pagination,
+                'cached' => false,
+                'source' => 'api',
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('Excepción al obtener especies de Colombia: ' . $e->getMessage(), [
+                'filters' => $filters,
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => ['message' => 'Error inesperado al obtener especies de Colombia: ' . $e->getMessage()],
+                'source' => 'api',
+            ];
+        }
+    }
+
+    /**
+     * Obtiene especies aleatorias de la base de datos local
+     */
+    private function getRandomSpeciesFromDatabase(array $filters): array
+    {
+        try {
+            $perPage = $filters['per_page'] ?? 24;
+            $page = $filters['page'] ?? 1;
+
+            // Construir query base
+            $query = Taxon::query()
+                ->where('rank', 'species')
+                ->whereNotNull('default_photo_id');
+
+            // Aplicar filtros
+            if (isset($filters['native']) && $filters['native']) {
+                $query->where('establishment_status_colombia', 'native');
+            }
+            if (isset($filters['endemic']) && $filters['endemic']) {
+                $query->where('establishment_status_colombia', 'endemic');
+            }
+            if (isset($filters['threatened']) && $filters['threatened']) {
+                $query->whereNotNull('conservation_status')
+                      ->whereIn('conservation_status', ['CR', 'EN', 'VU']);
+            }
+            if (isset($filters['rank']) && $filters['rank'] !== 'Todas') {
+                $query->where('class', $filters['rank']);
+            }
+
+            // Ordenamiento ALEATORIO usando RAND() de MySQL
+            $query->inRandomOrder();
+
+            // Paginar
+            $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+            // Formatear resultados
+            $formattedTaxa = $paginator->items();
+            $enrichedData = collect($formattedTaxa)->map->enriched_data->toArray();
+
+            Log::info('Random mode: using database', [
+                'total' => $paginator->total(),
+                'per_page' => $perPage,
+                'current_page' => $page
+            ]);
+
+            return [
+                'success' => true,
+                'data' => $enrichedData,
+                'pagination' => [
+                    'total' => $paginator->total(),
+                    'per_page' => $perPage,
+                    'current_page' => $page,
+                    'last_page' => $paginator->lastPage(),
+                ],
+                'cached' => false,
+                'source' => 'database',
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('Error en modo aleatorio: ' . $e->getMessage());
+            
+            return [
+                'success' => false,
+                'error' => ['message' => 'Error al obtener especies aleatorias: ' . $e->getMessage()],
+                'source' => 'database',
+            ];
+        }
     }
 
     /**
