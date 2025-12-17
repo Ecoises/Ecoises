@@ -9,6 +9,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\FileUpload;
 use Filament\Schemas\Components\Section;
+use Filament\Forms\Components\RichEditor;
 use Filament\Schemas\Schema;
 
 class UserForm
@@ -49,9 +50,8 @@ class UserForm
                             ->maxSize(2048)
                             ->helperText('Imagen de perfil (máx. 2MB)'),
                         
-                        Textarea::make('bio')
+                        RichEditor::make('bio')
                             ->label('Biografía')
-                            ->rows(3)
                             ->columnSpanFull(),
                     ])
                     ->columns(2),
@@ -66,7 +66,13 @@ class UserForm
                             ->searchable()
                             ->required()
                             ->helperText('Selecciona uno o más roles para este usuario'),
+
+                        Toggle::make('is_active')
+                            ->label('Usuario Activo')
+                            ->default(true)
+                            ->required(),
                     ]),
+                    
                 
                 Section::make('Gamificación')
                     ->schema([
@@ -92,15 +98,17 @@ class UserForm
                             ->dehydrated(false),
                     ])
                     ->columns(3)
-                    ->collapsed(),
+                    ->collapsed()
+                    ->hidden(function ($record) {
+                        // Ocultar para usuarios con roles administrativos
+                        if (!$record) {
+                            return false; // Mostrar en creación
+                        }
+                        return $record->hasAnyRole(['super_admin', 'panel_user', 'educador', 'editor']);
+                    }),
                 
-                Section::make('Estado')
-                    ->schema([
-                        Toggle::make('is_active')
-                            ->label('Usuario Activo')
-                            ->default(true)
-                            ->required(),
-                    ]),
+              
+                    
             ]);
     }
 }

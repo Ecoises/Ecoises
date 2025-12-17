@@ -25,6 +25,9 @@ class Lesson extends Model
         'content_text',
         'media_url',
         'media_type',
+        'audio_url',
+        'audio_timestamps',
+        'voice_id',
         'estimated_duration',
         'is_mandatory',
         'unlock_requirements',
@@ -42,6 +45,7 @@ class Lesson extends Model
         'is_mandatory' => 'boolean',
         'unlock_requirements' => 'array',
         'is_published' => 'boolean',
+        'audio_timestamps' => 'array',
     ];
     
     // Relaciones

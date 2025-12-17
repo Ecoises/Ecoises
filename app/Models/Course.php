@@ -18,6 +18,7 @@ class Course extends Model
      */
     protected $fillable = [
         'title',
+        'type',
         'description',
         'thumbnail_url',
         'difficulty_level',
@@ -33,6 +34,7 @@ class Course extends Model
         'completion_rate',
         'rating_average',
         'rating_count',
+        'references',
     ];
     
     /**
@@ -44,6 +46,7 @@ class Course extends Model
         'related_taxa' => 'array',
         'target_location_ids' => 'array',
         'is_published' => 'boolean',
+        'references' => 'array',
     ];
     
     // Relaciones
