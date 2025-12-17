@@ -34,6 +34,7 @@ class Lesson extends Model
         'is_published',
         'view_count',
         'completion_rate',
+        'points',
     ];
     
     /**
