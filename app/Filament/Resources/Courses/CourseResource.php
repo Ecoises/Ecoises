@@ -32,6 +32,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\View;
 
 use Filament\Actions\Action;
+use Hugomyb\FilamentMediaAction\Actions\MediaAction;
 
 use App\Filament\Resources\Courses\Pages\CreateCourse;
 use App\Filament\Resources\Courses\Pages\EditCourse;
@@ -136,28 +137,65 @@ class CourseResource extends Resource
                                                 ->default('94zOad0g7T7K4oa7zhDq')
                                                 ->required()
                                                 ->inline()
-                                                ->live(), // ← CRUCIAL para reactividad
-
-                                            // Un único reproductor inteligente
-                                            View::make('filament.components.audio-player')
-                                                ->columnSpanFull(),
-
-                                            Hidden::make('audio_url'),
+                                                ->live(),
                                             Hidden::make('audio_timestamps'),
+                                            Hidden::make('audio_url')
+                                                ->live(),// ← CRUCIAL para reactividad
                                         ])
                                         ->footerActions([
+                                            MediaAction::make('preview_voice')
+                                                ->label('Previsualizar voz')
+                                                ->icon('heroicon-o-speaker-wave')
+                                                ->color('info')
+                                                ->visible(fn (Get $get) => blank($get('audio_url')))
+                                                ->media(fn (Get $get) => match ($get('voice_id')) {
+                                                    '94zOad0g7T7K4oa7zhDq' => asset('audio/voice_preview_mauricio.mp3'),
+                                                    'V6isiXLBuRuM7uwHOVBA' => asset('audio/voice_preview_luisa.mp3'),
+                                                    'W1hAcdh0RNsPYUA7fkJh' => asset('audio/voice_preview_elfaraon.mp3'),
+                                                    default => null,
+                                                })
+                                                ->mediaType(MediaAction::TYPE_AUDIO)
+                                                ->modalHeading('Previsualización de la voz')
+                                                ->preload(false)
+                                                ->disableDownload(),
+
+                                            /*────────────────────────────────
+                                            | ESCUCHAR AUDIO GENERADO (solo si YA existe)
+                                            ────────────────────────────────*/
+                                            MediaAction::make('listen_generated_audio')
+                                                ->label('Escuchar audio generado')
+                                                ->icon('heroicon-o-play')
+                                                ->color('success')
+                                                ->visible(fn (Get $get) => filled($get('audio_url')))
+                                                ->media(fn (Get $get) => $get('audio_url'))
+                                                ->mediaType(MediaAction::TYPE_AUDIO)
+                                                ->modalHeading('Audio generado')
+                                                ->preload(false)
+                                                ->disableDownload(),
+
+                                            /*────────────────────────────────
+                                            | GENERAR / REGENERAR AUDIO
+                                            ────────────────────────────────*/
                                             Action::make('generate_audio')
-                                                ->label('Generar audio')
+                                                ->label(fn (Get $get) =>
+                                                    filled($get('audio_url'))
+                                                        ? 'Regenerar audio'
+                                                        : 'Generar audio'
+                                                )
                                                 ->icon('heroicon-m-speaker-wave')
                                                 ->color('primary')
                                                 ->requiresConfirmation()
-                                                ->modalHeading('Generar audio')
-                                                ->modalDescription('Se generará el audio y los timestamps desde el contenido.')
+                                                ->modalHeading(fn (Get $get) =>
+                                                    filled($get('audio_url'))
+                                                        ? 'Regenerar audio'
+                                                        : 'Generar audio'
+                                                )
+                                                ->modalDescription('El audio se generará a partir del contenido de la lección.')
                                                 ->action(function (Set $set, Get $get) {
                                                     $text = strip_tags($get('content_text') ?? '');
                                                     $voiceId = $get('voice_id');
 
-                                                    if (!$text) {
+                                                    if (! $text) {
                                                         Notification::make()
                                                             ->title('Contenido vacío')
                                                             ->danger()
