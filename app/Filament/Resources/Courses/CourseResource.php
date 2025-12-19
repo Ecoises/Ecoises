@@ -37,7 +37,10 @@ use Hugomyb\FilamentMediaAction\Actions\MediaAction;
 use App\Filament\Resources\Courses\Pages\CreateCourse;
 use App\Filament\Resources\Courses\Pages\EditCourse;
 use App\Filament\Resources\Courses\Pages\ListCourses;
+use App\Filament\Resources\Courses\Pages\ViewCourse;
 use App\Filament\Resources\Courses\Tables\CoursesTable;
+
+use App\Filament\Resources\Courses\Schemas\CourseInfolist;
 
 class CourseResource extends Resource
 {
@@ -90,9 +93,13 @@ class CourseResource extends Resource
 
                             FileUpload::make('thumbnail_url')
                                 ->label('Imagen de portada')
-                                ->image()
-                                ->directory('courses/thumbnails')
-                                ->imageEditor(),
+                                ->disk('public')  // Disco público
+                                ->directory('courses/thumbnails')  // Carpeta específica
+                                ->image()  // Solo imágenes
+                                ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])  // Tipos permitidos
+                                ->maxSize(2048)
+                                ->imageEditor()
+                                 ->live() ,
                         ]),
 
                     /*───────────────────────────────
@@ -363,11 +370,17 @@ class CourseResource extends Resource
         return [];
     }
 
+    public static function infolist(Schema $schema): Schema
+    {
+        return CourseInfolist::configure($schema);
+    }
+
     public static function getPages(): array
     {
         return [
             'index'  => ListCourses::route('/'),
             'create' => CreateCourse::route('/create'),
+            'view'   => ViewCourse::route('/{record}'),
             'edit'   => EditCourse::route('/{record}/edit'),
         ];
     }

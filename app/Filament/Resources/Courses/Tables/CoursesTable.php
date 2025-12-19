@@ -61,9 +61,10 @@ class CoursesTable
                 //
             ])
             ->recordActions([
+                ViewAction::make()
+                ->modal(false),
                 EditAction::make(),
                 DeleteAction::make(),
-                ViewAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
