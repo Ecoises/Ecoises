@@ -58,7 +58,7 @@ class CourseInfolist
                                     ->html()
                                     ->alignJustify(),
                                     TextEntry::make('audio_url')
-                                    ->label('Audio')
+                                    ->label('Audio de esta lección')
                                     ->formatStateUsing(fn (string $state): HtmlString => new HtmlString(
                                         '<audio controls class="w-full max-w-md">
                                             <source src="' . $state . '" type="audio/mpeg">
@@ -99,23 +99,59 @@ class CourseInfolist
                     ->collapsible(),
                 ])->columnSpan(['lg' => 2]),
 
+            Group::make()
+                ->schema([
+                    Section::make('Mas información')
+                    ->icon('heroicon-o-rectangle-stack')
+                    ->schema([
+                      
+                        ImageEntry::make('author.avatar')
+                            ->label('Avatar')
+                            ->imageHeight(40)
+                            ->circular(),
+                        
+                        TextEntry::make('author.full_name')
+                            ->label('Autor'),
+                            
+                        TextEntry::make('created_at')
+                            ->label('Creado el')
+                            ->formatStateUsing(fn (string $state): string => 
+                                \Carbon\Carbon::parse($state)->format('d/m/Y H:i')
+                            ),
+                        
+                        TextEntry::make('updated_at')
+                            ->label('Actualizado el')
+                            ->formatStateUsing(fn (string $state): string => 
+                                \Carbon\Carbon::parse($state)->format('d/m/Y H:i')
+                            ),
+                            TextEntry::make('difficulty_level')
+                            ->label('Dificultad')
+                            ->badge()
+                            ->color('primary')
+                            ->formatStateUsing(fn (string $state): string => ucwords($state)),
+
+                            TextEntry::make('category')
+                            ->label('Categoria')
+                            ->badge()
+                            ->color('primary')
+                            ->formatStateUsing(fn (string $state): string => ucwords($state)),
+                            
+                         
+                        
+                    
+                        
+                    ])
+                    ->columns(2)
+                    ->collapsible(),
+
+                
+                    
+                ])->columnSpan(['lg' => 1]),    
+
             
                 
 
-            Section::make('Lecciones')
-                ->collapsible()
-                ->schema([
-                    RepeatableEntry::make('lessons')
-                        ->schema([
-                            TextEntry::make('title')
-                                ->label('Lección')
-                                ->weight('bold'),
-
-                            TextEntry::make('content_text')
-                                ->label('Contenido')
-                                ->markdown(),
-                        ]),
-                ])->columnSpan(1),
+            
         ])->columns(3);
     }
 }
