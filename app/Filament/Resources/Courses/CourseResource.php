@@ -246,8 +246,7 @@ class CourseResource extends Resource
                                                     'matching'        => 'Emparejar',
                                                 ])
                                                 ->required()
-                                                ->reactive()
-                                                ->afterStateUpdated(fn (Set $set) => $set('content_data', null)),
+                                                ->reactive(),
 
                                             Textarea::make('title')
                                                 ->label('Pregunta/Enunciado')
@@ -255,7 +254,7 @@ class CourseResource extends Resource
 
                                             Section::make('Configuración Específica')
                                                 ->schema([
-                                                    // Configuración dinámica para Selección Múltiple
+                                                    // Selección Múltiple
                                                     Repeater::make('content_data.options')
                                                         ->label('Opciones de Respuesta')
                                                         ->visible(fn (Get $get) => $get('activity_type') === 'quiz_multiple')
@@ -273,38 +272,42 @@ class CourseResource extends Resource
                                                                 ->rows(2)
                                                                 ->placeholder('Explicación para esta opción (correcta o incorrecta)'),
                                                         ])
-                                                        ->defaultItems(2),
+                                                        ->defaultItems(2)
+                                                        ->collapsible()
+                                                        ->cloneable(),
 
-                                                    // Configuración dinámica para Verdadero/Falso
+                                                    // Verdadero/Falso
                                                     Radio::make('content_data.is_true')
-                                                        ->label('Respuesta Correcta: ¿Es Verdadero?')
+                                                        ->label('Respuesta Correcta')
                                                         ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
                                                         ->options([
                                                             'true' => 'Verdadero',
                                                             'false' => 'Falso',
                                                         ])
                                                         ->inline()
-                                                        ->default(false),
+                                                        ->required(),
 
-                                                    Textarea::make('content_data.feedback')
-                                                        ->label('Feedback para la respuesta Verdadero/Falso')
+                                                    Textarea::make('content_data.true_false_feedback')
+                                                        ->label('Explicación')
                                                         ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
                                                         ->rows(3)
                                                         ->placeholder('Explica por qué esta afirmación es verdadera o falsa'),
                                                     
-                                                    // Configuración dinámica para Arrastrar y Soltar
+                                                    // Arrastrar y Soltar
                                                     KeyValue::make('content_data.items')
                                                         ->label('Elementos a arrastrar')
                                                         ->visible(fn (Get $get) => $get('activity_type') === 'drag_drop')
                                                         ->keyLabel('Elemento')
-                                                        ->valueLabel('Destino'),
+                                                        ->valueLabel('Destino')
+                                                        ->addActionLabel('Agregar elemento')
+                                                        ->required(),
 
-                                                    Textarea::make('content_data.feedback')
-                                                        ->label('Feedback general del orden o diseño')
+                                                    Textarea::make('content_data.drag_drop_feedback')
+                                                        ->label('Explicación del orden correcto')
                                                         ->visible(fn (Get $get) => $get('activity_type') === 'drag_drop')
                                                         ->rows(2),
 
-                                                    // Configuración dinámica para Emparejamiento
+                                                    // Emparejamiento
                                                     Repeater::make('content_data.pairs')
                                                         ->label('Pares a Emparejar')
                                                         ->visible(fn (Get $get) => $get('activity_type') === 'matching')
@@ -321,17 +324,17 @@ class CourseResource extends Resource
                                                                 ->label('Feedback para este par')
                                                                 ->rows(2),
                                                         ])
-                                                        ->defaultItems(1),
+                                                        ->defaultItems(1)
+                                                        ->collapsible()
+                                                        ->cloneable()
+                                                        ->required(),
                                                 ])
                                                 ->collapsible(),
-                                                
 
-                                            Textarea::make('explanation')
-                                                ->label('Feedback general de la actividad')
-                                                ->rows(3)
-                                                ->placeholder('Explicación general para los resultados de esta actividad'),
+                                            
                                         ])
-                                        ->collapsible(),
+                                        ->collapsible()
+                                        ->itemLabel(fn (array $state): ?string => $state['title'] ?? null),
                                 ])
                                 ->collapsible(),
                         ]),

@@ -31,8 +31,7 @@ class CoursesTable
                 TextColumn::make('achievement.name')
                     ->numeric()
                     ->sortable(),
-                TextColumn::make('author.id')
-                    ->numeric()
+                TextColumn::make('author.full_name')
                     ->sortable(),
                 IconColumn::make('is_published')
                     ->boolean(),
