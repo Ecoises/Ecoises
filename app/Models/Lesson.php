@@ -32,6 +32,7 @@ class Lesson extends Model
         'is_mandatory',
         'unlock_requirements',
         'is_published',
+        'status',
         'view_count',
         'completion_rate',
         'points',
@@ -46,9 +47,20 @@ class Lesson extends Model
         'is_mandatory' => 'boolean',
         'unlock_requirements' => 'array',
         'is_published' => 'boolean',
+        'status' => 'string',
+        'estimated_duration' => 'integer',
         'audio_timestamps' => 'array',
     ];
     
+    public static function estimateReadingTime(?string $text): int
+    {
+        if (!$text) return 0;
+        // Limpiar HTML y contar palabras
+        $words = str_word_count(strip_tags($text));
+        $wpm = 200; // Palabras por minuto promedio
+        return max(1, (int) ceil(($words / $wpm) * 60));
+    }
+
     // Relaciones
     
     public function course(): BelongsTo

@@ -68,10 +68,19 @@ class ElevenLabsService
         
         // Extract alignment (timestamps)
         $alignment = $data['alignment'] ?? [];
+        
+        // Calculate total duration in seconds
+        $duration = 0;
+        if (!empty($alignment['char_start_times_ms']) && !empty($alignment['char_durations_ms'])) {
+            $lastIndex = count($alignment['char_start_times_ms']) - 1;
+            $durationMs = $alignment['char_start_times_ms'][$lastIndex] + $alignment['char_durations_ms'][$lastIndex];
+            $duration = round($durationMs / 1000, 2);
+        }
 
         return [
             'audio_url' => $url,
             'audio_timestamps' => $alignment,
+            'duration' => $duration,
             'voice_id' => $voiceId,
         ];
     }
