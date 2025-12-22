@@ -25,11 +25,27 @@ use App\Filament\Resources\Courses\Tables\CoursesTable;
 use App\Filament\Resources\Courses\Schemas\CourseInfolist;
 use App\Filament\Resources\Courses\Schemas\CourseForm;
 
+use UnitEnum;
+
+
 class CourseResource extends Resource
 {
     protected static ?  string $model = Course::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-stack';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rocket-launch';
+
+
+
+    protected static string | UnitEnum | null $navigationGroup = 'Contenido Educativo';
+
+
+    protected static ?int $navigationSort = 1;
+
+    protected static ?string $navigationLabel = 'Guías Interactivas';
+
+    protected static ?string $modelLabel = 'Guía Interactiva';
+
+    protected static ?string $pluralModelLabel = 'Guías Interactivas';
 
     protected static ?  string $recordTitleAttribute = 'title';
 

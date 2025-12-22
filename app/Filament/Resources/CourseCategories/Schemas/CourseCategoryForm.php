@@ -5,6 +5,8 @@ namespace App\Filament\Resources\CourseCategories\Schemas;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Schemas\Schema;
+use Filament\Schemas\Components\Utilities\Set;
+use Illuminate\Support\Str;
 
 class CourseCategoryForm
 {
@@ -13,9 +15,14 @@ class CourseCategoryForm
         return $schema
             ->components([
                 TextInput::make('name')
-                    ->required(),
+                    ->required()
+                    ->live(debounce: 500)
+                    ->afterStateUpdated(fn ($state, Set $set) => $set('slug', Str::slug($state))),
                 TextInput::make('slug')
-                    ->required(),
+                    ->readOnly()
+                    ->dehydrated()
+                    ->required()
+                    ->unique(\App\Models\CourseCategory::class, 'slug', ignoreRecord: true),
                 Textarea::make('description')
                     ->columnSpanFull(),
             ]);

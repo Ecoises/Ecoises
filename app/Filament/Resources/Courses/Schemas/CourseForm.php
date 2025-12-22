@@ -13,20 +13,21 @@ use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
-use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Hugomyb\FilamentMediaAction\Actions\MediaAction;
+use Illuminate\Support\Str;
 
 class CourseForm
 {
@@ -39,118 +40,120 @@ class CourseForm
                      | PASO 1 — INFORMACIÓN GENERAL
                      ───────────────────────────────*/
                     Step::make('Información General')
-                    ->schema([
-                        // Columna izquierda: Nombre y Descripción (más ancha)
-                        Grid::make(1)
-                            ->schema([
-                                TextInput::make('title')
-                                    ->label('Título del curso / lección')
-                                    ->required()
-                                    ->maxLength(255),
+                        ->schema([
+                            // Columna izquierda: Nombre y Descripción (más ancha)
+                            Grid::make(1)
+                                ->schema([
+                                    TextInput::make('title')
+                                        ->label('Título del curso / lección')
+                                        ->required()
+                                        ->maxLength(255),
 
-                                Hidden::make('author_id')
-                                    ->default(fn () => auth()->id()),
+                                    Hidden::make('author_id')
+                                        ->default(fn () => auth()->id()),
 
-                                RichEditor::make('description')
-                                    ->label('Breve descripción'),
-                            ])
-                            ->columnSpan(2), // Ocupa 2 de 3 columnas (66%)
+                                    RichEditor::make('description')
+                                        ->label('Breve descripción'),
+                                ])
+                                ->columnSpan(2), // Ocupa 2 de 3 columnas (66%)
 
-                        // Columna derecha: Imagen (más pequeña)
-                        Grid::make(1)
-                            ->schema([
-                                FileUpload::make('thumbnail_url')
-                                    ->label('Imagen de portada')
-                                    ->disk('public')
-                                    ->directory('courses/thumbnails')
-                                    ->image()
-                                    ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
-                                    ->maxSize(2048)
-                                    ->imageEditor()
-                                    ->imagePreviewHeight('250')
-                                    ->panelAspectRatio('16:9')
-                                    ->panelLayout('compact')
-                                    ->live(),
-                            ])
-                            ->columnSpan(1), 
+                            // Columna derecha: Imagen (más pequeña)
+                            Grid::make(1)
+                                ->schema([
+                                    FileUpload::make('thumbnail_url')
+                                        ->label('Imagen de portada')
+                                        ->disk('public')
+                                        ->directory('courses/thumbnails')
+                                        ->image()
+                                        ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+                                        ->maxSize(2048)
+                                        ->imageEditor()
+                                        ->imagePreviewHeight('250')
+                                        ->panelAspectRatio('16:9')
+                                        ->panelLayout('compact')
+                                        ->live(),
+                                ])
+                                ->columnSpan(1),
 
-                        Section::make()
-                            ->schema([])
-                            ->columnSpanFull(),
+                            Section::make()
+                                ->schema([])
+                                ->columnSpanFull(),
 
-                        // Resto de campos en 2 columnas
-                        Grid::make(2)
-                            ->schema([
-                                Select::make('type')
-                                    ->label('Tipo de contenido')
-                                    ->options([
-                                        'modular' => 'Curso modular',
-                                        'simple' => 'Lección simple',
-                                    ])
-                                    ->default('modular')
-                                    ->required()
-                                    ->live(),
+                            // Resto de campos en 2 columnas
+                            Grid::make(2)
+                                ->schema([
+                                    Select::make('type')
+                                        ->label('Tipo de contenido')
+                                        ->options([
+                                            'modular' => 'Curso modular',
+                                            'simple' => 'Lección simple',
+                                        ])
+                                        ->default('modular')
+                                        ->required()
+                                        ->live(),
 
-                                Select::make('category_id')
-                                    ->label('Categoría')
-                                    ->relationship('category', 'name')
-                                    ->searchable()
-                                    ->preload()
-                                    ->createOptionForm([
-                                        TextInput::make('name')
-                                            ->required()
-                                            ->live(onBlur: true)
-                                            ->afterStateUpdated(fn (Set $set, $state) => $set('slug', \Illuminate\Support\Str::slug($state))),
-                                        TextInput::make('slug')
-                                            ->required()
-                                            ->unique('course_categories', 'slug'),
-                                    ])
-                                    ->required(),
+                                    Select::make('category_id')
+                                        ->label('Categoría')
+                                        ->relationship('category', 'name')
+                                        ->searchable()
+                                        ->preload()
+                                        ->createOptionForm([
+                                            TextInput::make('name')
+                                                ->required()
+                                                ->live(debounce: 500)
+                                                ->afterStateUpdated(fn ($state, Set $set) => $set('slug', Str::slug($state))),
+                                            TextInput::make('slug')
+                                                ->readOnly()
+                                                ->dehydrated()
+                                                ->required()
+                                                ->unique('course_categories', 'slug', ignoreRecord: true),
+                                        ])
+                                        ->required(),
 
-                                TagsInput::make('tags')
-                                    ->label('Etiquetas')
-                                    ->separator(',')
-                                    ->placeholder('Nueva etiqueta'),
+                                    TagsInput::make('tags')
+                                        ->label('Etiquetas')
+                                        ->separator(',')
+                                        ->placeholder('Nueva etiqueta'),
 
-                                Select::make('status')
-                                    ->label('Estado del contenido')
-                                    ->options(Course::getStatuses())
-                                    ->default(Course::STATUS_DRAFT)
-                                    ->required(),
+                                    Select::make('status')
+                                        ->label('Estado del contenido')
+                                        ->options(Course::getStatuses())
+                                        ->default(Course::STATUS_DRAFT)
+                                        ->required(),
 
-                                TextInput::make('estimated_duration')
-                                    ->label('Duración estimada total (HH:MM:SS)')
-                                    ->placeholder('00:00:00')
-                                    ->readOnly()
-                                    ->dehydrated()
-                                    ->columnSpanFull() // Ocupa todo el ancho de las 2 columnas
-                                    ->afterStateHydrated(function (TextInput $component, $state) {
-                                        if (filled($state) && ! str_contains((string) $state, ':')) {
-                                            $state = (int) $state;
-                                            $hours = floor($state / 3600);
-                                            $minutes = floor(($state % 3600) / 60);
-                                            $seconds = $state % 60;
-                                            $component->state(sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds));
-                                        }
-                                    })
-                                    ->dehydrateStateUsing(function ($state) {
-                                        if (empty($state)) {
-                                            return 0;
-                                        }
-                                        if (is_numeric($state)) {
-                                            return (int) $state;
-                                        }
-                                        $parts = explode(':', (string) $state);
-                                        if (count($parts) !== 3) {
-                                            return 0;
-                                        }
+                                    TextInput::make('estimated_duration')
+                                        ->label('Duración estimada total (HH:MM:SS)')
+                                        ->placeholder('00:00:00')
+                                        ->readOnly()
+                                        ->dehydrated()
+                                        ->columnSpanFull() // Ocupa todo el ancho de las 2 columnas
+                                        ->afterStateHydrated(function (TextInput $component, $state) {
+                                            if (filled($state) && ! str_contains((string) $state, ':')) {
+                                                $state = (int) $state;
+                                                $hours = floor($state / 3600);
+                                                $minutes = floor(($state % 3600) / 60);
+                                                $seconds = $state % 60;
+                                                $component->state(sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds));
+                                            }
+                                        })
+                                        ->dehydrateStateUsing(function ($state) {
+                                            if (empty($state)) {
+                                                return 0;
+                                            }
+                                            if (is_numeric($state)) {
+                                                return (int) $state;
+                                            }
+                                            $parts = explode(':', (string) $state);
+                                            if (count($parts) !== 3) {
+                                                return 0;
+                                            }
 
-                                        return ($parts[0] * 3600) + ($parts[1] * 60) + (int) $parts[2];
-                                    }),
-                            ])
-                            ->columnSpanFull(), 
-                    ])
-                    ->columns(3), 
+                                            return ($parts[0] * 3600) + ($parts[1] * 60) + (int) $parts[2];
+                                        }),
+                                ])
+                                ->columnSpanFull(),
+                        ])
+                        ->columns(3),
 
                     /*───────────────────────────────
                      | PASO 2 — CONTENIDO Y AUDIO

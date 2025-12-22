@@ -9,6 +9,7 @@ use Filament\Actions\ViewAction;
 use Filament\Actions\DeleteAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Table;
 
 
@@ -18,27 +19,21 @@ class CoursesTable
     {
         return $table
             ->columns([
+                ImageColumn::make('thumbnail_url')
+                    ->disk('public')
+                    ->label('Portada')
+                    ->circular(),
                 TextColumn::make('title')
                     ->searchable(),
-                TextColumn::make('difficulty_level'),
+                // TextColumn::make('difficulty_level'),
                 TextColumn::make('category.name')
-                    ->label('Categoría')
+                    ->label('Área Temática')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('tags')
-                    ->label('Etiquetas')
-                    ->badge()
-                    ->separator(','),
-                TextColumn::make('estimated_duration')
-                    ->label('Duración')
-                    ->sortable()
-                    ->formatStateUsing(function ($state) {
-                        if (!$state) return '00:00:00';
-                        $hours = floor($state / 3600);
-                        $minutes = floor(($state % 3600) / 60);
-                        $seconds = $state % 60;
-                        return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
-                    }),
+                TextColumn::make('author.full_name')
+                    ->label('Autor')
+                    ->searchable()
+                    ->sortable(),    
                 TextColumn::make('status')
                 ->label('Estado')
                 ->badge()
@@ -65,26 +60,6 @@ class CoursesTable
                 })
                 ->sortable()
                 ->searchable(),
-                TextColumn::make('completion_points')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('achievement.name')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('author.full_name')
-                    ->sortable(),
-                TextColumn::make('enrollment_count')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('completion_rate')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('rating_average')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('rating_count')
-                    ->numeric()
-                    ->sortable(),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()

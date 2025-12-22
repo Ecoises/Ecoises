@@ -23,7 +23,7 @@ class CourseInfolist
 
             Group::make()
                 ->schema([
-                    Section::make('Información del curso')
+                    Section::make('Información de la Guía')
                     ->icon('heroicon-o-book-open')
                     ->schema([
                         TextEntry::make('title')
@@ -125,105 +125,102 @@ class CourseInfolist
                     ->collapsible(),
                 ])->columnSpan(['lg' => 2]),
 
-            Group::make()
-            ->schema([
-                Section::make('Mas información')
-                ->icon('heroicon-o-information-circle')
+                Group::make()
                 ->schema([
-                    Section::make('Autor')
-                    ->icon('heroicon-m-user')
+                    Section::make('Mas información')
+                    ->icon('heroicon-o-information-circle')
                     ->schema([
-                        ImageEntry::make('author.avatar')
-                            ->hiddenLabel()
-                            ->imageHeight(40)
-                            ->circular()
-                            ->alignCenter(),
+                        Section::make('Autor')
+                        ->icon('heroicon-m-user')
+                        ->schema([
+                            ImageEntry::make('author.avatar')
+                                ->hiddenLabel()
+                                ->imageHeight(40)
+                                ->circular()
+                                ->alignCenter(),
 
-                        TextEntry::make('author.full_name')
-                            ->hiddenLabel()
-                            ->alignCenter(),
-                    ])
-                    ->columns(1)
-                    ->compact(),
-                    
-                    // Grupo para los campos que quieres en 2 columnas
-                    Group::make()
-                    ->schema([
-                        TextEntry::make('created_at')
-                            ->label('Creado el')
-                            ->formatStateUsing(fn (string $state): string => 
-                                \Carbon\Carbon::parse($state)->format('d/m/Y H:i')
-                            ),
+                            TextEntry::make('author.full_name')
+                                ->hiddenLabel()
+                                ->alignCenter(),
+                        ])
+                        ->columns(1)
+                        ->compact(),
                         
-                        TextEntry::make('updated_at')
-                            ->label('Actualizado el')
-                            ->formatStateUsing(fn (string $state): string => 
-                                \Carbon\Carbon::parse($state)->format('d/m/Y H:i')
-                            ),
-                    ])
-                    ->columns(2),
-                    
-                    // Grupo para los campos que quieres en 1 columna (normal)
-                    Group::make()
-                    ->schema([
-                        TextEntry::make('status')
-                            ->label('Estado')
+                        // Grupo para los campos que quieres en 2 columnas
+                        Group::make()
+                        ->schema([
+                            TextEntry::make('created_at')
+                                ->label('Creado el')
+                                ->dateTime('d M, Y') 
+                                ->size('sm'), 
+                            
+                            TextEntry::make('updated_at')
+                                ->label('Actualizado el')
+                                ->dateTime('d M, Y')
+                                ->size('sm'), 
+                        ])
+                        ->columns(2),
+                        
+                        // Grupo para los campos que quieres en 1 columna (normal)
+                        Group::make()
+                        ->schema([
+                            TextEntry::make('status')
+                                ->label('Estado')
+                                ->badge()
+                                ->icon(fn (string $state): string => match ($state) {
+                                    'draft' => 'heroicon-o-pencil-square',
+                                    'pending' => 'heroicon-o-clock',
+                                    'reviewed' => 'heroicon-o-eye',
+                                    'published' => 'heroicon-o-check-circle',
+                                    default => 'heroicon-o-question-mark-circle',
+                                })
+                                ->color(fn (string $state): string => match ($state) {
+                                    'draft' => 'warning',
+                                    'pending' => 'danger',
+                                    'reviewed' => 'info',
+                                    'published' => 'success',
+                                    default => 'warning',
+                                })
+                                ->formatStateUsing(fn (string $state): string => match ($state) {
+                                    'draft' => 'Borrador',
+                                    'pending' => 'Pendiente',
+                                    'reviewed' => 'Revisado',
+                                    'published' => 'Publicado',
+                                    default => $state,
+                                }),
+
+                            TextEntry::make('estimated_duration')
+                                ->label('Duración Total')
+                                ->formatStateUsing(function ($state) {
+                                    if (!$state) return '00:00:00';
+                                    $hours = floor($state / 3600);
+                                    $minutes = floor(($state % 3600) / 60);
+                                    $seconds = $state % 60;
+                                    return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
+                                }),
+
+                            TextEntry::make('difficulty_level')
+                            ->label('Dificultad')
                             ->badge()
-                            ->icon(fn (string $state): string => match ($state) {
-                                'draft' => 'heroicon-o-pencil-square',
-                                'pending' => 'heroicon-o-clock',
-                                'reviewed' => 'heroicon-o-eye',
-                                'published' => 'heroicon-o-check-circle',
-                                default => 'heroicon-o-question-mark-circle',
-                            })
-                            ->color(fn (string $state): string => match ($state) {
-                                'draft' => 'warning',
-                                'pending' => 'danger',
-                                'reviewed' => 'info',
-                                'published' => 'success',
-                                default => 'warning',
-                            })
-                            ->formatStateUsing(fn (string $state): string => match ($state) {
-                                'draft' => 'Borrador',
-                                'pending' => 'Pendiente',
-                                'reviewed' => 'Revisado',
-                                'published' => 'Publicado',
-                                default => $state,
-                            }),
+                            ->color('primary')
+                            ->formatStateUsing(fn (string $state): string => ucwords($state)),
 
-                        TextEntry::make('estimated_duration')
-                            ->label('Duración Total')
-                            ->formatStateUsing(function ($state) {
-                                if (!$state) return '00:00:00';
-                                $hours = floor($state / 3600);
-                                $minutes = floor(($state % 3600) / 60);
-                                $seconds = $state % 60;
-                                return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
-                            }),
+                            TextEntry::make('category.name')
+                            ->label('Categoria')
+                            ->badge()
+                            ->color('primary'),
 
-                        TextEntry::make('difficulty_level')
-                        ->label('Dificultad')
-                        ->badge()
-                        ->color('primary')
-                        ->formatStateUsing(fn (string $state): string => ucwords($state)),
-
-                        TextEntry::make('category.name')
-                        ->label('Categoria')
-                        ->badge()
-                        ->color('primary'),
-
+                            
+                        ])
+                        ->columns(2), 
                         TextEntry::make('tags')
-                        ->label('Etiquetas')
-                        ->badge()
-                        ->separator(','),
+                            ->label('Etiquetas')
+                            ->badge()
+                            ->separator(',')
+                            ->color('gray'),// Una sola columna para estos campos
                     ])
-                    ->columns(2), // Una sola columna para estos campos
-                ])
-                ->collapsible(),
-            ])->columnSpan(['lg' => 1]),    
-
-            
-                
+                    ->collapsible(),
+                ])->columnSpan(['lg' => 1]),    
 
             
         ])->columns(3);
