@@ -11,6 +11,7 @@ use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Infolists\Components\RepeatableEntry;
+use App\Filament\Infolists\Components\ActivityContentEntry;
 use Filament\Infolists\Components\ImageEntry;
 use Illuminate\Support\HtmlString;
 
@@ -92,33 +93,10 @@ class CourseInfolist
                                 RepeatableEntry::make('activities')
                                     ->label('Actividades de esta lección')
                                     ->schema([
-                                        TextEntry::make('activity_type')
-                                            ->label('Tipo')
-                                            ->badge()
-                                            ->formatStateUsing(fn (string $state): string => match ($state) {
-                                                'quiz_multiple' => 'Selección múltiple',
-                                                'quiz_true_false' => 'Verdadero/Falso',
-                                                'drag_drop' => 'Arrastrar y soltar',
-                                                'matching' => 'Emparejar',
-                                                default => $state,
-                                            }),
-
-                                        TextEntry::make('title')
-                                            ->label('Pregunta/Enunciado'),
-
-                                        TextEntry::make('content_data')
-                                            ->label('Respuestas/Opciones')
-                                            ->formatStateUsing(fn ($state): string => 
-                                                is_array($state) 
-                                                    ? json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) 
-                                                    : (string) ($state ?: 'Sin datos')
-                                            )
-                                            ->copyable(),
-
-                                        TextEntry::make('explanation')
-                                            ->label('Feedback')
-                                            ->default('Sin feedback'),
-                                    ]),
+                                        ActivityContentEntry::make('content_data')
+                                            ->hiddenLabel(),
+                                    ])
+                                    ->contained(false)
                             ])
                             ->visible(fn ($record) => $record->type === 'modular'),
                     ])

@@ -50,6 +50,7 @@ class AdminPanelProvider extends PanelProvider
                 AccountWidget::class,
                 FilamentInfoWidget::class,
             ])
+            ->viteTheme('resources/css/filament/admin/theme.css')
             ->plugin(FilamentShieldPlugin::make())
             ->middleware([
                 EncryptCookies::class,
