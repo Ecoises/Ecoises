@@ -5,8 +5,10 @@ namespace App\Filament\Resources\CourseCategories;
 use App\Filament\Resources\CourseCategories\Pages\CreateCourseCategory;
 use App\Filament\Resources\CourseCategories\Pages\EditCourseCategory;
 use App\Filament\Resources\CourseCategories\Pages\ListCourseCategories;
+use App\Filament\Resources\CourseCategories\Pages\ViewCourseCategory;
 use App\Filament\Resources\CourseCategories\Schemas\CourseCategoryForm;
 use App\Filament\Resources\CourseCategories\Tables\CourseCategoriesTable;
+use App\Filament\Resources\CourseCategories\RelationManagers\CoursesRelationManager;
 use App\Models\CourseCategory;
 use BackedEnum;
 use UnitEnum;
@@ -47,7 +49,7 @@ class CourseCategoryResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            CoursesRelationManager::class,
         ];
     }
 
@@ -56,6 +58,7 @@ class CourseCategoryResource extends Resource
         return [
             'index' => ListCourseCategories::route('/'),
             'create' => CreateCourseCategory::route('/create'),
+            'view' => ViewCourseCategory::route('/{record}'),
             'edit' => EditCourseCategory::route('/{record}/edit'),
         ];
     }
