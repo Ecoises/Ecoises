@@ -98,4 +98,16 @@ class User extends Authenticatable implements HasName
         // en caso de que 'full_name' esté nulo en algún registro.
         return $this->full_name ?? $this->email;
     }
+
+    // New/Updated Relations for CTI
+
+    public function enrollments(): HasMany
+    {
+        return $this->hasMany(UserContentEnrollment::class);
+    }
+
+    public function createdContent(): HasMany
+    {
+        return $this->hasMany(EducationalContent::class, 'author_id');
+    }
 }
