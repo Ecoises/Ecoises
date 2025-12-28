@@ -2,14 +2,16 @@
 
 namespace App\Filament\Resources\EducationalContents;
 
+use App\Models\EducationalContent;
+use BackedEnum;
+use UnitEnum;
 use App\Filament\Resources\EducationalContents\Pages\CreateEducationalContent;
 use App\Filament\Resources\EducationalContents\Pages\EditEducationalContent;
 use App\Filament\Resources\EducationalContents\Pages\ListEducationalContents;
 use App\Filament\Resources\EducationalContents\Schemas\EducationalContentForm;
 use App\Filament\Resources\EducationalContents\Schemas\EducationalContentInfolist;
 use App\Filament\Resources\EducationalContents\Tables\EducationalContentsTable;
-use App\Models\EducationalContent;
-use BackedEnum;
+
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -19,7 +21,15 @@ class EducationalContentResource extends Resource
 {
     protected static ?string $model = EducationalContent::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedAcademicCap;
+
+    protected static string | UnitEnum | null $navigationGroup = 'Gestión de Contenido';
+
+    protected static ?string $navigationLabel = 'Contenido Educativo';
+
+    protected static ?string $modelLabel = 'Contenido Educativo';
+
+    protected static ?string $pluralModelLabel = 'Contenido Educativo';
 
     protected static ?string $recordTitleAttribute = 'title';
 

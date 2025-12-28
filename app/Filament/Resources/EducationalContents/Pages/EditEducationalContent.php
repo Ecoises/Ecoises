@@ -45,12 +45,12 @@ class EditEducationalContent extends EditRecord
 
             if ($record->content_type === 'course') {
                 $record->courseDetails()->updateOrCreate(
-                    ['educational_content_id' => $record->id],
+                    ['id' => $record->id],
                     $courseDetailsData
                 );
             } elseif ($record->content_type === 'article') {
                 $record->articleDetails()->updateOrCreate(
-                    ['educational_content_id' => $record->id],
+                    ['id' => $record->id],
                     $articleDetailsData
                 );
             }

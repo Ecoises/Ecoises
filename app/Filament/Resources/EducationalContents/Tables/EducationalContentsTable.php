@@ -3,11 +3,19 @@
 namespace App\Filament\Resources\EducationalContents\Tables;
 
 use App\Models\EducationalContent;
-use Filament\Tables;
-use Filament\Tables\Table;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
+use Filament\Tables;
+use Filament\Actions\Action;
+use Filament\Tables\Table;
+use Filament\Actions\DeleteBulkAction;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Filament\Notifications\Notification;
+use Filament\Tables\Columns\ImageColumn;
 
 class EducationalContentsTable
 {
@@ -15,10 +23,12 @@ class EducationalContentsTable
     {
         return $table
             ->columns([
-                Tables\Columns\ImageColumn::make('thumbnail_url')
-                    ->label('Imagen')
-                    ->circular()
-                    ->defaultImageUrl(url('/images/default-thumbnail.png')),
+                ImageColumn::make('thumbnail_url')
+                    ->disk('public')
+                    ->label('Portada')
+                    ->circular(),
+
+                
 
                 Tables\Columns\TextColumn::make('title')
                     ->label('Título')
@@ -35,7 +45,7 @@ class EducationalContentsTable
                     )
                     ->color(fn (string $state): string => match ($state) {
                         EducationalContent::TYPE_COURSE => 'primary',
-                        EducationalContent::TYPE_ARTICLE => 'success',
+                        EducationalContent::TYPE_ARTICLE => 'info',
                         default => 'gray',
                     })
                     ->icon(fn (string $state): ?string => match ($state) {
@@ -69,9 +79,17 @@ class EducationalContentsTable
                     ->badge()
                     ->formatStateUsing(fn (string $state): string => EducationalContent::getStatuses()[$state] ?? $state
                     )
+                    ->sortable()
+                    ->icon(fn (string $state): ?string => match ($state) {
+                        EducationalContent::STATUS_DRAFT => 'heroicon-o-document-text',
+                        EducationalContent::STATUS_PENDING => 'heroicon-o-clock',
+                        EducationalContent::STATUS_REVIEWED => 'heroicon-o-document-text',
+                        EducationalContent::STATUS_PUBLISHED => 'heroicon-o-document-text',
+                        default => null,
+                    })
                     ->color(fn (string $state): string => match ($state) {
-                        EducationalContent::STATUS_DRAFT => 'gray',
-                        EducationalContent::STATUS_PENDING => 'warning',
+                        EducationalContent::STATUS_DRAFT => 'warning',
+                        EducationalContent::STATUS_PENDING => 'danger',
                         EducationalContent::STATUS_REVIEWED => 'info',
                         EducationalContent::STATUS_PUBLISHED => 'success',
                         default => 'gray',
@@ -132,13 +150,26 @@ class EducationalContentsTable
                     ->query(fn (Builder $query): Builder => $query->where('is_featured', true)),
             ])
             ->actions([
-                
+                ViewAction::make(),
+                EditAction::make(),
+                DeleteAction::make()
+                ->successNotification(
+                    Notification::make()
+                        ->success()
+                        ->title('Contenido eliminado')
+                        ->body('El contenido ha sido eliminado correctamente.'),
+                    ) 
             ])
             ->bulkActions([
+
                 BulkActionGroup::make([
-                    BulkAction::make('delete')
-                        ->requiresConfirmation()
-                        ->action(fn (Collection $records) => $records->each->delete()),
+                    DeleteBulkAction::make()
+                        ->successNotification(
+                            Notification::make()
+                                ->success()
+                                ->title('Contenido eliminado')
+                                ->body('El contenido seleccionado ha sido eliminado correctamente.'),
+                        ),
                     BulkAction::make('publish')
                         ->label('Publicar')
                         ->icon('heroicon-o-check-circle')
@@ -151,7 +182,7 @@ class EducationalContentsTable
                         )
                         ->deselectRecordsAfterCompletion(),
 
-                  BulkAction::make('unpublish')
+                    BulkAction::make('unpublish')
                         ->label('Despublicar')
                         ->icon('heroicon-o-x-circle')
                         ->color('danger')
@@ -161,6 +192,17 @@ class EducationalContentsTable
                         ->deselectRecordsAfterCompletion(),
                 ]),
             ])
-            ->defaultSort('created_at', 'desc');
+            ->defaultSort('created_at', 'desc')
+            ->emptyStateHeading('Aún no hay contenido')
+            ->emptyStateDescription('Aún no se han creado contenidos educativos.')
+            ->emptyStateIcon('heroicon-o-document-text')
+            ->emptyStateActions([
+                Action::make('create')
+                    ->label('Crear contenido')
+                    ->icon('heroicon-o-plus')
+                    ->url(route('filament.admin.resources.educational-contents.create'))
+                    ->button(),
+            ]);
+           
     }
 }

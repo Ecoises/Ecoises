@@ -5,6 +5,7 @@ namespace App\Filament\Resources\ContentCategories;
 use App\Filament\Resources\ContentCategories\Pages\ManageContentCategories;
 use App\Models\ContentCategory;
 use BackedEnum;
+use UnitEnum;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -20,7 +21,15 @@ class ContentCategoryResource extends Resource
 {
     protected static ?string $model = ContentCategory::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRocketLaunch;
+
+    protected static string | UnitEnum | null $navigationGroup = 'Gestión de Contenido';
+
+    protected static ?string $navigationLabel = 'Áreas Temáticas';
+
+    protected static ?string $modelLabel = 'Área Temática';
+
+    protected static ?string $pluralModelLabel = 'Áreas Temáticas';
 
     protected static ?string $recordTitleAttribute = 'name';
 
