@@ -44,7 +44,6 @@ class EducationalContent extends Model
         'is_published',
         'is_featured',
         'status',
-        'references',
         'view_count',
         'rating_average',
         'rating_count',
@@ -52,7 +51,6 @@ class EducationalContent extends Model
 
     protected $casts = [
         'tags' => 'array',
-        'references' => 'array',
         'is_published' => 'boolean',
         'is_featured' => 'boolean',
     ];

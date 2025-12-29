@@ -81,10 +81,10 @@ class EducationalContentsTable
                     )
                     ->sortable()
                     ->icon(fn (string $state): ?string => match ($state) {
-                        EducationalContent::STATUS_DRAFT => 'heroicon-o-document-text',
+                        EducationalContent::STATUS_DRAFT => 'heroicon-o-pencil-square',
                         EducationalContent::STATUS_PENDING => 'heroicon-o-clock',
                         EducationalContent::STATUS_REVIEWED => 'heroicon-o-document-text',
-                        EducationalContent::STATUS_PUBLISHED => 'heroicon-o-document-text',
+                        EducationalContent::STATUS_PUBLISHED => 'heroicon-o-check-badge',
                         default => null,
                     })
                     ->color(fn (string $state): string => match ($state) {

@@ -31,6 +31,7 @@ class Lesson extends Model
         'view_count',
         'completion_rate',
         'points',
+        'references',
     ];
 
     protected $casts = [
@@ -38,6 +39,9 @@ class Lesson extends Model
         'unlock_requirements' => 'array',
         'is_published' => 'boolean',
         'audio_timestamps' => 'array',
+        'is_published' => 'boolean',
+        'audio_timestamps' => 'array',
+        'references' => 'array',
     ];
 
     public static function estimateReadingTime(?string $text): int

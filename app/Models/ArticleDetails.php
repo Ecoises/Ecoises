@@ -22,12 +22,16 @@ class ArticleDetails extends Model
         'voice_id',
         'read_time',
         'word_count',
+        'word_count',
         'related_taxa',
+        'references',
     ];
 
     protected $casts = [
         'audio_timestamps' => 'array',
+        'audio_timestamps' => 'array',
         'related_taxa' => 'array',
+        'references' => 'array',
     ];
 
     public function content(): BelongsTo

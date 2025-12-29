@@ -18,8 +18,6 @@ class CourseDetails extends Model
         'id',
         'completion_points',
         'achievement_id',
-        'related_taxa',
-        'target_location_ids',
         'enrollment_count',
         'completion_rate',
         'has_certificate',
@@ -27,8 +25,6 @@ class CourseDetails extends Model
     ];
 
     protected $casts = [
-        'related_taxa' => 'array',
-        'target_location_ids' => 'array',
         'prerequisite_content_ids' => 'array',
         'has_certificate' => 'boolean',
     ];

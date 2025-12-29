@@ -13,6 +13,11 @@ class CreateEducationalContent extends CreateRecord
 {
     protected static string $resource = EducationalContentResource::class;
 
+    protected function getFormActions(): array
+    {
+        return [];
+    }
+
     protected function handleRecordCreation(array $data): Model
     {
         return DB::transaction(function () use ($data) {

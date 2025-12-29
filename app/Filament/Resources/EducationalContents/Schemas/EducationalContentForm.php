@@ -12,6 +12,7 @@ use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\RichEditor;
+use Filament\Forms\Components\MarkdownEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
@@ -20,6 +21,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -28,6 +30,7 @@ use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Hugomyb\FilamentMediaAction\Actions\MediaAction;
 use Illuminate\Support\Str;
+
 
 class EducationalContentForm
 {
@@ -59,8 +62,10 @@ class EducationalContentForm
                                     Hidden::make('author_id')
                                         ->default(fn () => auth()->id()),
 
-                                    RichEditor::make('description')
-                                        ->label('Breve descripción'),
+                                    MarkdownEditor::make('description')
+                                        ->label('Breve descripción')
+                                        ->minHeight('50px') // Por defecto suele ser 300px o más
+                                        ->maxHeight('60px'),
                                 ])
                                 ->columnSpan(2),
 
@@ -115,13 +120,19 @@ class EducationalContentForm
                                     TextInput::make('course_details.completion_points')
                                         ->label('Puntos por completar')
                                         ->numeric()
-                                        ->visible(fn (Get $get) => $get('content_type') === 'course'),
-                                        
-                                    // Detalles de Artículo
+                                        ->visible(fn (Get $get) => $get('content_type') === 'course')
+                                        ->default(100),
+
                                     TextInput::make('article_details.read_time')
-                                        ->label('Tiempo de lectura (min)')
-                                        ->numeric()
-                                        ->visible(fn (Get $get) => $get('content_type') === 'article'),
+                                    ->label('Tiempo de lectura (min)')
+                                    ->numeric()
+                                    ->prefix('aprox.')
+                                    ->suffix('minutos')
+                                    ->readonly()
+                                    ->visible(fn (Get $get) => $get('content_type') === 'article')
+                                    ->live(),
+                                        
+                                    
 
                                     
                                 ])
@@ -146,11 +157,63 @@ class EducationalContentForm
                                     ->label('Título de la lección')
                                     ->required(),
                                     RichEditor::make('content_text')
-                                    ->label('Contenido de la lección')
-                                    ->helperText('Aquí puedes redactar el contenido educativo detallado para la lección.')
-                                    ->required(),
+                                    ->label('Contenido de la Lección')
+                                    ->required()
+                                    ->live(onBlur: true)
+                                    ->helperText(function (?string $state): string {
+                                        // Mantenemos tu lógica de cálculo para el texto de ayuda
+                                        $words = Str::wordCount(strip_tags($state ?? ''));
+                                        $minutes = ceil($words / 200);
+
+                                        return "Aquí puedes redactar el contenido educativo detallado para la lección. Estimación: {$minutes} min de lectura ({$words} palabras).";
+                                    })
+                                    ->afterStateUpdated(function (Set $set, ?string $state) {
+                                        // 1. Verificamos si hay texto, si no, ponemos 0
+                                        if (blank($state)) {
+                                            $set('estimated_duration', 0);
+                                            return;
+                                        }
+
+                                        // 2. Limpiamos el HTML
+                                        $plainText = strip_tags($state);
+                                        
+                                        // 3. Contamos palabras
+                                        $words = Str::wordCount($plainText);
+                                        
+                                        // 4. Calculamos minutos (estándar 200 palabras/min)
+                                        $minutes = (int) ceil($words / 200);
+                                        
+                                        // 5. Asignamos el valor a la columna de la lección
+                                        // IMPORTANTE: Aquí cambiamos 'article_details.read_time' por 'estimated_duration'
+                                        $set('estimated_duration', max(1, $minutes));
+                                    }),
                                     
                                     self::getAudioSectionSchema(),
+
+                                    Repeater::make('references')
+                                    ->label('Bibliografía y Referencias')
+                                    ->itemLabel(function (array $state, $uuid, $component): string {
+                                        $index = array_search($uuid, array_keys($component->getState())) + 1;
+                                        
+                                        return "[{$index}] " . Str::limit($state['citation'] ?? '', 40);
+                                    })
+                                    ->schema([
+                                        Group::make([
+                                            Textarea::make('citation')
+                                                ->hiddenLabel()
+                                                ->placeholder('Pega aquí la cita bibliográfica...')
+                                                ->rows(1)
+                                                ->autosize()
+                                                ->required()
+                                                ->grow(),
+                                        ])->columns(1),
+                                    ])
+                                    ->reorderable()
+                                    ->reorderableWithButtons()
+                                    ->collapsible()
+                                    ->cloneable()
+                                    ->addActionLabel('Añadir nueva fuente')
+                                    ->defaultItems(0),
                                         
                                     Repeater::make('activities')
                                         ->relationship('activities')
@@ -170,10 +233,60 @@ class EducationalContentForm
                                 ->schema([
                                     RichEditor::make('article_details.content_text')
                                         ->label('Contenido del Artículo')
-                                        ->helperText('Aquí puedes redactar el contenido educativo detallado para el artículo.')
-                                        ->required(),
+                                        ->helperText(function (?string $state): string {
+                                            $words = Str::wordCount(strip_tags($state));
+                                            $minutes = ceil($words / 200);
+
+                                            return "Aquí puedes redactar el contenido educativo detallado para el artículo. Estimación: {$minutes} min de lectura ({$words} palabras).";
+                                        })
+                                        ->required()
+                                        ->live(onBlur: true)
+                                        ->afterStateUpdated(function (Set $set, ?string $state) { // El ? permite que sea nulo
+                                            // 1. Verificamos si hay texto, si no, ponemos 0 o 1
+                                            if (blank($state)) {
+                                                $set('article_details.read_time', 0);
+                                                return;
+                                            }
+
+                                            // 2. Limpiamos el HTML
+                                            $plainText = strip_tags($state);
+                                            
+                                            // 3. Contamos palabras (usando el helper de Laravel para soporte multi-idioma)
+                                            $words = Str::wordCount($plainText);
+                                            
+                                            // 4. Calculamos (200 palabras por minuto es el estándar)
+                                            $minutes = (int) ceil($words / 200);
+                                            
+                                            // 5. Asignamos el valor al campo del JSON
+                                            $set('article_details.read_time', max(1, $minutes));
+                                        }),
                                     
                                     self::getAudioSectionSchema('article_details'),
+
+                                    Repeater::make('references')
+                                    ->label('Bibliografía y Referencias')
+                                    ->itemLabel(function (array $state, $uuid, $component): string {
+                                        $index = array_search($uuid, array_keys($component->getState())) + 1;
+                                        
+                                        return "[{$index}] " . Str::limit($state['citation'] ?? '', 40);
+                                    })
+                                    ->schema([
+                                        Group::make([
+                                            Textarea::make('citation')
+                                                ->hiddenLabel()
+                                                ->placeholder('Pega aquí la cita bibliográfica...')
+                                                ->rows(1)
+                                                ->autosize()
+                                                ->required()
+                                                ->grow(),
+                                        ])->columns(1),
+                                    ])
+                                    ->reorderable()
+                                    ->reorderableWithButtons()
+                                    ->collapsible()
+                                    ->cloneable()
+                                    ->addActionLabel('Añadir nueva fuente')
+                                    ->defaultItems(0),
 
                                     Repeater::make('activities')
                                         ->label('Actividades del Artículo')
@@ -188,7 +301,9 @@ class EducationalContentForm
                      ───────────────────────────────*/
                     Step::make('Publicación')
                         ->schema([
-                            Select::make('status')
+                            Group::make()
+                            ->schema([
+                                Select::make('status')
                                 ->options([
                                     'draft' => 'Borrador',
                                     'reviewed' => 'Revisado',
@@ -196,15 +311,21 @@ class EducationalContentForm
                                 ])
                                 ->default('draft')
                                 ->required(),
-                            TextInput::make('estimated_duration')
-                                ->label('Duración Total (segundos)')
-                                ->numeric()
-                                ->default(0)
-                                ->readOnly(),
+                            // Detalles de Artículo
+                                
                             Toggle::make('is_published')->label('Publicar ahora'),
-                        ]),
+                            ])->columns(2),
+                        ])
+                      
                 ])
-                ->columnSpanFull(),
+                ->columnSpanFull()
+                  ->submitAction(
+                        Action::make('save')
+                        ->label('Guardar')
+                        ->button()
+                        ->color('primary')
+                        ->icon('heroicon-o-folder-open')
+                    ),
             ]);
     }
 
@@ -216,6 +337,7 @@ class EducationalContentForm
         return Section::make('Audio del Contenido')
             ->description('Selecciona una voz para generar automáticamente la versión en audio del contenido redactado.')
             ->icon('heroicon-o-speaker-wave')
+            ->collapsed()
             ->collapsible()
             ->schema([
                 ToggleButtons::make("{$prefix}{$dot}voice_id")
