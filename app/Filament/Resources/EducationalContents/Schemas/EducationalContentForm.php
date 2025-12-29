@@ -77,6 +77,10 @@ class EducationalContentForm
                                 ])
                                 ->columnSpan(1),
 
+                            Section::make()
+                                ->schema([])
+                                ->columnSpanFull(),
+
                             Grid::make(2)
                                 ->schema([
                                     Select::make('content_type')
@@ -87,25 +91,21 @@ class EducationalContentForm
                                         ])
                                         ->default('course')
                                         ->required()
+                                        ->native(false)
                                         ->live(),
 
                                     Select::make('categories')
                                         ->relationship('categories', 'name')
+                                        ->label('Área temática')
                                         ->multiple()
                                         ->preload()
                                         ->searchable(),
 
                                     TagsInput::make('tags')
+                                        ->label('Etiquetas')
                                         ->separator(','),
 
-                                    Select::make('status')
-                                        ->options([
-                                            'draft' => 'Borrador',
-                                            'reviewed' => 'Revisado',
-                                            'published' => 'Publicado',
-                                        ])
-                                        ->default('draft')
-                                        ->required(),
+                                    
 
                                     // Detalles de Curso
                                     TextInput::make('course_details.completion_points')
@@ -119,11 +119,7 @@ class EducationalContentForm
                                         ->numeric()
                                         ->visible(fn (Get $get) => $get('content_type') === 'article'),
 
-                                    TextInput::make('estimated_duration')
-                                        ->label('Duración Total (segundos)')
-                                        ->numeric()
-                                        ->default(0)
-                                        ->readOnly(),
+                                    
                                 ])
                                 ->columnSpanFull(),
                         ])
@@ -142,10 +138,16 @@ class EducationalContentForm
                                 ->orderColumn('lesson_order')
                                 ->defaultItems(1)
                                 ->schema([
-                                    TextInput::make('title')->required(),
-                                    RichEditor::make('content_text')->required(),
+                                    TextInput::make('title')
+                                    ->label('Título de la lección')
+                                    ->required(),
+                                    RichEditor::make('content_text')
+                                    ->label('Contenido de la lección')
+                                    ->helperText('Aquí puedes redactar el contenido educativo detallado para la lección.')
+                                    ->required(),
                                     
                                     Section::make('Audio de la Lección')
+                                        ->description('Selecciona una voz para generar automáticamente la versión en audio del contenido redactado.')
                                         ->icon('heroicon-o-speaker-wave')
                                         ->collapsible()
                                         ->schema([
@@ -159,7 +161,7 @@ class EducationalContentForm
                                                 ->icons([
                                                     '94zOad0g7T7K4oa7zhDq' => 'heroicon-m-microphone',
                                                     'V6isiXLBuRuM7uwHOVBA' => 'heroicon-m-microphone',
-                                                    'W1hAcdh0RNsPYUA7fkJh' => 'heroicon-m-bolt',
+                                                    'W1hAcdh0RNsPYUA7fkJh' => 'heroicon-m-microphone',
                                                 ])
                                                 ->colors([
                                                     '94zOad0g7T7K4oa7zhDq' => 'info',
@@ -178,7 +180,7 @@ class EducationalContentForm
                                             MediaAction::make('preview_voice')
                                                 ->label('Previsualizar voz')
                                                 ->icon('heroicon-o-speaker-wave')
-                                                ->color('info')
+                                                ->color('secondary')
                                                 ->visible(fn (Get $get) => blank($get('audio_url')))
                                                 ->media(fn (Get $get) => match ($get('voice_id')) {
                                                     '94zOad0g7T7K4oa7zhDq' => asset('audio/voice_preview_mauricio.mp3'),
@@ -242,15 +244,18 @@ class EducationalContentForm
                                                     }
                                                 }),
                                         ])
-                                        ->collapsed(),
+                                        ,
                                         
                                     Repeater::make('activities')
                                         ->relationship('activities')
                                         ->schema(self::getActivitySchema())
-                                        ->collapsed()
-                                        ->label('Actividades de Lección'),
+                                        ->collapsible()
+                                        ->label('Actividades interactivas')
+                                        ->defaultItems(0)
+                                        ->addActionLabel('Añadir nueva actividad')
+                                        ->reorderableWithButtons(),
                                 ])
-                                ->collapsed()
+                                ->collapsible()
                                 ->itemLabel(fn (array $state): ?string => $state['title'] ?? null),
 
                             // SECCIÓN ARTÍCULOS: Contenido Directo + Actividades
@@ -275,7 +280,7 @@ class EducationalContentForm
                                                 ->icons([
                                                     '94zOad0g7T7K4oa7zhDq' => 'heroicon-m-microphone',
                                                     'V6isiXLBuRuM7uwHOVBA' => 'heroicon-m-microphone',
-                                                    'W1hAcdh0RNsPYUA7fkJh' => 'heroicon-m-bolt',
+                                                    'W1hAcdh0RNsPYUA7fkJh' => 'heroicon-m-microphone',
                                                 ])
                                                 ->colors([
                                                     '94zOad0g7T7K4oa7zhDq' => 'info',
@@ -294,7 +299,7 @@ class EducationalContentForm
                                             MediaAction::make('preview_voice_article') // Unique name
                                                 ->label('Previsualizar voz')
                                                 ->icon('heroicon-o-speaker-wave')
-                                                ->color('info')
+                                                ->color('secundary')
                                                 ->visible(fn (Get $get) => blank($get('article_details.audio_url')))
                                                 ->media(fn (Get $get) => match ($get('article_details.voice_id')) {
                                                     '94zOad0g7T7K4oa7zhDq' => asset('audio/voice_preview_mauricio.mp3'),
@@ -351,13 +356,13 @@ class EducationalContentForm
                                                     }
                                                 }),
                                         ])
-                                        ->collapsed(),
+                                        ->collapsible(),
 
                                     Repeater::make('activities')
                                         ->label('Actividades del Artículo')
                                         ->relationship('activities') // MorphMany
                                         ->schema(self::getActivitySchema())
-                                        ->collapsed(),
+                                        ->collapsible(),
                                 ]),
                         ]),
 
@@ -366,6 +371,19 @@ class EducationalContentForm
                      ───────────────────────────────*/
                     Step::make('Publicación')
                         ->schema([
+                            Select::make('status')
+                                ->options([
+                                    'draft' => 'Borrador',
+                                    'reviewed' => 'Revisado',
+                                    'published' => 'Publicado',
+                                ])
+                                ->default('draft')
+                                ->required(),
+                            TextInput::make('estimated_duration')
+                                ->label('Duración Total (segundos)')
+                                ->numeric()
+                                ->default(0)
+                                ->readOnly(),
                             Toggle::make('is_published')->label('Publicar ahora'),
                         ]),
                 ])
@@ -377,6 +395,7 @@ class EducationalContentForm
     {
         return [
             Select::make('activity_type')
+                ->label('Tipo de actividad')
                 ->options([
                     'quiz_multiple' => 'Selección Múltiple',
                     'quiz_true_false' => 'Verdadero/Falso',
@@ -384,39 +403,78 @@ class EducationalContentForm
                     'matching' => 'Emparejar',
                 ])
                 ->live()
+                ->native(false)
                 ->required(),
 
             Textarea::make('title')
                 ->label('Pregunta/Enunciado')
                 ->required(),
 
-            Section::make('Configuración')
+            Section::make('Diseño de Actividades')
+                ->icon('heroicon-o-squares-plus')
+                ->description('Configura el tipo de evaluación o ejercicio para este contenido')
+                ->collapsible()
                 ->schema([
                     // Quiz Multiple
                     Repeater::make('content_data.options')
+                        ->label('Opciones de respuesta')
                         ->visible(fn (Get $get) => $get('activity_type') === 'quiz_multiple')
                         ->schema([
-                            TextInput::make('text')->required(),
-                            Toggle::make('is_correct'),
-                            Textarea::make('feedback'),
-                        ]),
+                            TextInput::make('text')->required()
+                            ->label('Escribe una opción'),
+                            Toggle::make('is_correct')
+                            ->label('Es la respuesta correcta'),
+                            Textarea::make('feedback')
+                            ->label('Explicación')
+                            ->placeholder('Explica brevemente por qué esta opción es (o no) la correcta.')
+                            ,
+                        ])
+                        ->addActionLabel('Añadir otra opción')
+                        ->defaultItems(4)
+                        ->reorderableWithButtons(),
                     
                     // True/False
                     Radio::make('content_data.is_true')
+                        ->label('Respuesta correcta')
                         ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
-                        ->options(['true' => 'Verdadero', 'false' => 'Falso']),
+                        ->options([
+                            'true' => 'Verdadero',
+                            'false' => 'Falso'
+                        ])
+                        ->inline(),
+                    Textarea::make('content_data.true_false_feedback')
+                        ->label('Explicación')
+                        ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
+                        ->rows(3)
+                        ->placeholder('Explica por qué esta afirmación es verdadera o falsa'),
                         
                     // Drag Drop
                     KeyValue::make('content_data.items')
-                        ->visible(fn (Get $get) => $get('activity_type') === 'drag_drop'),
+                        ->label('Relacionar conceptos')
+                        ->keyLabel('Palabra o frase')
+                        ->valueLabel('Pertenece a...')
+                        ->helperText('Crea una lista de elementos. A la izquierda la palabra clave y a la derecha su grupo o descripción.')
+                        ->visible(fn (Get $get) => $get('activity_type') === 'drag_drop')
+                        ->addActionLabel('Añadir elemento'),
                         
                     // Matching
                     Repeater::make('content_data.pairs')
-                        ->visible(fn (Get $get) => $get('activity_type') === 'matching')
-                        ->schema([
-                            TextInput::make('term')->required(),
-                            TextInput::make('match')->required(),
-                        ]),
+                    ->label('Crear parejas')
+                    ->helperText('Crea conexiones. Los usuarios deberán unir el lado A con el lado B.')
+                    ->visible(fn (Get $get) => $get('activity_type') === 'matching')
+                    ->schema([
+                        TextInput::make('term')
+                            ->label('Lado A')
+                            ->placeholder('Pregunta o concepto')
+                            ->required(),
+                        TextInput::make('match')
+                            ->label('Lado B')
+                            ->placeholder('Respuesta o pareja')
+                            ->required(),
+                    ])
+                    ->columns(2)
+                    ->addActionLabel('Añadir nueva pareja')
+                    ->reorderableWithButtons()
                 ]),
         ];
     }
