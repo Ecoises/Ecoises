@@ -9,7 +9,7 @@
             src="{{ asset('storage/' . $state) }}" 
             alt="Miniatura del curso"
             style="
-                max-height: 350px;
+                max-height: 250px;
                 width: auto;
                 border-radius: 8px;
                 object-fit: cover;

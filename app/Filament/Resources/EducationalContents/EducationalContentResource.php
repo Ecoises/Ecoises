@@ -8,6 +8,7 @@ use UnitEnum;
 use App\Filament\Resources\EducationalContents\Pages\CreateEducationalContent;
 use App\Filament\Resources\EducationalContents\Pages\EditEducationalContent;
 use App\Filament\Resources\EducationalContents\Pages\ListEducationalContents;
+use App\Filament\Resources\EducationalContents\Pages\ViewEducationalContent;
 use App\Filament\Resources\EducationalContents\Schemas\EducationalContentForm;
 use App\Filament\Resources\EducationalContents\Schemas\EducationalContentInfolist;
 use App\Filament\Resources\EducationalContents\Tables\EducationalContentsTable;
@@ -60,6 +61,7 @@ class EducationalContentResource extends Resource
         return [
             'index' => ListEducationalContents::route('/'),
             'create' => CreateEducationalContent::route('/create'),
+            'view' => ViewEducationalContent::route('/{record}'),
             'edit' => EditEducationalContent::route('/{record}/edit'),
         ];
     }
