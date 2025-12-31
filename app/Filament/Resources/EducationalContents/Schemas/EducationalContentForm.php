@@ -76,12 +76,12 @@ class EducationalContentForm
                                         ->disk('public')
                                         ->directory('content/thumbnails')
                                         ->image()
-                                        ->maxSize(2048)
+                                        ->maxSize(10240)
                                         ->imageEditor()
                                         ->panelAspectRatio('16:9')
-                                        ->helperText('Sube una imagen llamativa para la portada. Peso máximo: 2MB.')
+                                        ->helperText('Sube una imagen llamativa para la portada. Peso máximo: 10MB.')
                                         ->validationMessages([
-                                            'max' => 'La imagen es muy pesada. Debe pesar menos de 2MB.',
+                                            'max' => 'La imagen es muy pesada. Debe pesar menos de 10MB.',
                                         ]),
                                 ])
                                 ->columnSpan(1),
@@ -331,7 +331,6 @@ class EducationalContentForm
 
     public static function getAudioSectionSchema(string $prefix = ''): Section
     {
-        // Aseguramos que el punto solo se agregue si hay un prefijo
         $dot = filled($prefix) ? '.' : '';
 
         return Section::make('Audio del Contenido')
@@ -397,12 +396,12 @@ class EducationalContentForm
                     ->color('primary')
                     ->requiresConfirmation()
                     ->action(function (Set $set, Get $get) use ($prefix, $dot) {
-                        // Lógica para detectar el texto fuente según el contexto
                         $sourceField = filled($prefix) ? "{$prefix}.content_text" : "content_text";
                         $text = strip_tags($get($sourceField) ?? '');
+
                         $voiceId = $get("{$prefix}{$dot}voice_id");
 
-                        if (!$text) {
+                        if (empty(trim($text))) {
                             Notification::make()->title('Contenido vacío')->danger()->send();
                             return;
                         }
@@ -412,23 +411,27 @@ class EducationalContentForm
                             $result = $service->generate($text, $voiceId);
 
                             $set("{$prefix}{$dot}audio_url", $result['audio_url']);
-                            $set("{$prefix}{$dot}audio_timestamps", $result['audio_timestamps']);
-                            
-                            // Si estamos en un artículo, actualizamos la duración total
-                            if ($prefix === 'article_details') {
-                                $set('estimated_duration', $result['duration']);
-                            } else {
-                                // Si estamos en una lección
-                                $set('estimated_duration', $result['duration']);
-                            }
 
-                            Notification::make()->title('Audio generado correctamente')->success()->send();
+                            // Guardamos solo el array de palabras con timestamps (formato limpio y útil)
+                            $set("{$prefix}{$dot}audio_timestamps", json_encode($result['audio_timestamps']['words'] ?? []));
+
+                            // Actualizar duración estimada
+                            $set('estimated_duration', $result['duration']);
+
+                            Notification::make()
+                                ->title('Audio generado correctamente')
+                                ->success()
+                                ->send();
                         } catch (\Throwable $e) {
-                            Notification::make()->title('Error')->body($e->getMessage())->danger()->send();
+                            Notification::make()
+                                ->title('Error al generar audio')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
                         }
                     }),
             ]);
-    }
+        }
 
     public static function getActivitySchema(): array
     {

@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Process;
 
 class ElevenLabsService
 {
@@ -17,13 +18,7 @@ class ElevenLabsService
     }
 
     /**
-     * Generate audio from text with timestamps.
-     *
-     * @param string $text
-     * @param string $voiceId
-     * @param string $modelId
-     * @return array
-     * @throws \Exception
+     * Genera audio a partir de texto, manejando textos largos automáticamente.
      */
     public function generate(string $text, string $voiceId, string $modelId = 'eleven_multilingual_v2'): array
     {
@@ -31,65 +26,192 @@ class ElevenLabsService
             throw new \Exception('ElevenLabs API key is not configured.');
         }
 
-        $response = Http::withHeaders([
-            'xi-api-key' => $this->apiKey,
-            'Content-Type' => 'application/json',
-        ])->post("{$this->baseUrl}/text-to-speech/{$voiceId}/with-timestamps", [
-            'text' => $text,
-            'model_id' => $modelId,
-            'voice_settings' => [
-                'stability' => 0.5,
-                'similarity_boost' => 0.75,
-            ],
-        ]);
-
-        if (!$response->successful()) {
-            throw new \Exception('ElevenLabs API Error: ' . $response->body());
+        if (empty(trim($text))) {
+            throw new \Exception('El texto para generar audio está vacío.');
         }
 
-        $data = $response->json();
-        
-        // The response contains base64 audio and alignment data
-        if (!isset($data['audio_base64'])) {
-            throw new \Exception('Invalid response from ElevenLabs API: No audio data.');
+        // Dividir en chunks de máximo ~1200 caracteres respetando párrafos y oraciones
+        $chunks = $this->splitIntoChunks(trim($text), 1200);
+
+        $audioParts = [];
+        $wordTimestamps = [];
+        $totalDuration = 0.0;
+        $previousRequestIds = [];
+
+        foreach ($chunks as $chunk) {
+            $payload = [
+                'text' => $chunk,
+                'model_id' => $modelId,
+                'voice_settings' => [
+                    'stability' => 0.5,
+                    'similarity_boost' => 0.75,
+                ],
+                'previous_request_ids' => $previousRequestIds, // Mejora continuidad prosódica
+            ];
+
+            $response = Http::timeout(90)
+                ->withHeaders([
+                    'xi-api-key' => $this->apiKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->post("{$this->baseUrl}/text-to-speech/{$voiceId}/with-timestamps", $payload);
+
+            if (!$response->successful()) {
+                throw new \Exception('ElevenLabs API Error: ' . $response->body());
+            }
+
+            $data = $response->json();
+
+            if (!isset($data['audio_base64'])) {
+                throw new \Exception('Invalid response from ElevenLabs API: No audio data.');
+            }
+
+            // Guardar request_id para continuidad en próximos chunks
+            if (isset($data['request_id'])) {
+                $previousRequestIds[] = $data['request_id'];
+                // Mantener solo los últimos 5 para no sobrecargar
+                if (count($previousRequestIds) > 5) {
+                    array_shift($previousRequestIds);
+                }
+            }
+
+            $audioContent = base64_decode($data['audio_base64']);
+            $audioParts[] = $audioContent;
+
+            // Extraer y ajustar timestamps de palabras
+            $words = $data['alignment']['words'] ?? [];
+            foreach ($words as $wordData) {
+                $wordTimestamps[] = [
+                    'word' => $wordData['word'],
+                    'start' => round($wordData['start'] + $totalDuration, 3),
+                    'end'   => round($wordData['end'] + $totalDuration, 3),
+                ];
+            }
+
+            // Calcular duración del chunk
+            $chunkDuration = 0.0;
+            if (!empty($words)) {
+                $chunkDuration = end($words)['end'];
+            } elseif (!empty($data['alignment']['character_end_times_seconds'])) {
+                $chunkDuration = end($data['alignment']['character_end_times_seconds']);
+            }
+
+            $totalDuration += $chunkDuration;
         }
 
-        // Decode audio
-        $audioContent = base64_decode($data['audio_base64']);
-        
-        // Generate filename
+        // Concatenar todos los audios en uno solo
+        $finalAudio = $this->concatenateAudioParts($audioParts);
+
+        // Guardar archivo final
         $filename = 'audio/' . Str::uuid() . '.mp3';
-        
-        // Store file in public disk
-        Storage::disk('public')->put($filename, $audioContent);
-        
-        // Get URL
+        Storage::disk('public')->put($filename, $finalAudio);
         $url = Storage::url($filename);
-        
-        // Extract alignment (timestamps)
-        $alignment = $data['alignment'] ?? [];
-        
-        // Calculate total duration in seconds
-        $duration = 0;
-        if (!empty($alignment['char_start_times_ms']) && !empty($alignment['char_durations_ms'])) {
-            $lastIndex = count($alignment['char_start_times_ms']) - 1;
-            $durationMs = $alignment['char_start_times_ms'][$lastIndex] + $alignment['char_durations_ms'][$lastIndex];
-            $duration = round($durationMs / 1000, 2);
-        }
 
         return [
-            'audio_url' => $url,
-            'audio_timestamps' => $alignment,
-            'duration' => $duration,
-            'voice_id' => $voiceId,
+            'audio_url'       => $url,
+            'audio_timestamps'=> ['words' => $wordTimestamps], // Solo palabras, tiempos globales
+            'duration'        => round($totalDuration, 2),
+            'voice_id'        => $voiceId,
         ];
     }
-    
-    /**
-     * Get available voices.
-     * 
-     * @return array
-     */
+
+    private function splitIntoChunks(string $text, int $maxLength): array
+    {
+        $paragraphs = preg_split('/\n\s*\n/', $text);
+        $chunks = [];
+        $current = '';
+
+        foreach ($paragraphs as $para) {
+            $para = trim($para);
+
+            if (strlen($current . $para) + 2 <= $maxLength) {
+                $current .= ($current ? "\n\n" : '') . $para;
+                continue;
+            }
+
+            if ($current) {
+                $chunks[] = $current;
+            }
+
+            // Si un párrafo es muy largo, dividir por oraciones
+            if (strlen($para) > $maxLength) {
+                $sentences = preg_split('/(?<=[.!?])\s+/', $para);
+                $subCurrent = '';
+
+                foreach ($sentences as $sentence) {
+                    if (strlen($subCurrent . $sentence) + 1 <= $maxLength) {
+                        $subCurrent .= ($subCurrent ? ' ' : '') . $sentence;
+                    } else {
+                        if ($subCurrent) {
+                            $chunks[] = trim($subCurrent);
+                        }
+                        $subCurrent = $sentence;
+                    }
+                }
+
+                if ($subCurrent) {
+                    $chunks[] = trim($subCurrent);
+                }
+            } else {
+                $chunks[] = $para;
+            }
+
+            $current = '';
+        }
+
+        if ($current) {
+            $chunks[] = $current;
+        }
+
+        return array_filter($chunks);
+    }
+
+    private function concatenateAudioParts(array $parts): string
+    {
+        if (count($parts) === 1) {
+            return $parts[0];
+        }
+
+        // Crear archivos temporales
+        $tempFiles = [];
+        $listContent = '';
+
+        foreach ($parts as $part) {
+            $tempFile = tempnam(sys_get_temp_dir(), 'eleven_') . '.mp3';
+            file_put_contents($tempFile, $part);
+            $tempFiles[] = $tempFile;
+            $listContent .= "file '$tempFile'\n";
+        }
+
+        // Archivo de lista para ffmpeg
+        $listFile = tempnam(sys_get_temp_dir(), 'concat_list');
+        file_put_contents($listFile, $listContent);
+
+        // Archivo de salida temporal
+        $outputFile = tempnam(sys_get_temp_dir(), 'final_audio') . '.mp3';
+
+        // Concatenar sin re-encodear (rápido y sin pérdida de calidad)
+        $process = Process::fromShellCommandline("ffmpeg -f concat -safe 0 -i \"$listFile\" -c copy \"$outputFile\"");
+        $process->run();
+
+        if (!$process->isSuccessful()) {
+            // Limpieza antes de lanzar error
+            foreach ($tempFiles as $f) @unlink($f);
+            @unlink($listFile);
+            @unlink($outputFile);
+            throw new \Exception('Error al concatenar audio con FFmpeg: ' . $process->getErrorOutput());
+        }
+
+        $finalAudio = file_get_contents($outputFile);
+
+        // Limpieza
+        foreach ($tempFiles as $f) @unlink($f);
+        @unlink($listFile);
+        @unlink($outputFile);
+
+        return $finalAudio;
+    }
+
     public function getVoices(): array
     {
         if (empty($this->apiKey)) {
@@ -97,17 +219,16 @@ class ElevenLabsService
         }
 
         try {
-            $response = Http::withHeaders([
-                'xi-api-key' => $this->apiKey,
-            ])->get("{$this->baseUrl}/voices");
-            
+            $response = Http::withHeaders(['xi-api-key' => $this->apiKey])
+                ->get("{$this->baseUrl}/voices");
+
             if ($response->successful()) {
                 return $response->json()['voices'] ?? [];
             }
         } catch (\Exception $e) {
-            // Log error or just return empty
+            // Silenciar errores
         }
-        
+
         return [];
     }
 }

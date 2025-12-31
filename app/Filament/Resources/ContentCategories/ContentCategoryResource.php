@@ -16,6 +16,9 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Illuminate\Support\Str;
 
 class ContentCategoryResource extends Resource
 {
@@ -39,7 +42,15 @@ class ContentCategoryResource extends Resource
             ->components([
                 TextInput::make('name')
                     ->required()
-                    ->maxLength(255),
+                    ->maxLength(255)
+                    ->live(debounce: 500)
+                    ->afterStateUpdated(fn ($state, Set $set) => $set('slug', Str::slug($state))),
+
+                TextInput::make('slug')
+                    ->required()
+                    ->unique('content_categories', 'slug', ignoreRecord: true)
+                    ->dehydrated()
+                    ->readOnly(),
             ]);
     }
 
