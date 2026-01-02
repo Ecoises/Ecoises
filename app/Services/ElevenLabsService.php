@@ -172,42 +172,50 @@ class ElevenLabsService
             return $parts[0];
         }
 
-        // Crear archivos temporales
-        $tempFiles = [];
-        $listContent = '';
+        // Ruta completa a tu ffmpeg.exe (cámbiala si la carpeta es diferente)
+        $ffmpegPath = 'C:\\ffmpeg\\bin\\ffmpeg.exe';
 
-        foreach ($parts as $part) {
-            $tempFile = tempnam(sys_get_temp_dir(), 'eleven_') . '.mp3';
-            file_put_contents($tempFile, $part);
-            $tempFiles[] = $tempFile;
-            $listContent .= "file '$tempFile'\n";
+        // Verificar que el archivo exista
+        if (!file_exists($ffmpegPath)) {
+            throw new \Exception("FFmpeg no encontrado en: $ffmpegPath. Verifica la ruta.");
         }
 
-        // Archivo de lista para ffmpeg
-        $listFile = tempnam(sys_get_temp_dir(), 'concat_list');
-        file_put_contents($listFile, $listContent);
-
-        // Archivo de salida temporal
+        $tempFiles = [];
+        $listFile = tempnam(sys_get_temp_dir(), 'audio_list');
         $outputFile = tempnam(sys_get_temp_dir(), 'final_audio') . '.mp3';
 
-        // Concatenar sin re-encodear (rápido y sin pérdida de calidad)
-        $process = Process::fromShellCommandline("ffmpeg -f concat -safe 0 -i \"$listFile\" -c copy \"$outputFile\"");
-        $process->run();
+        try {
+            // Crear archivos temporales para cada parte
+            foreach ($parts as $i => $part) {
+                $temp = tempnam(sys_get_temp_dir(), 'part') . '.mp3';
+                file_put_contents($temp, $part);
+                $tempFiles[] = $temp;
+                file_put_contents($listFile, "file '$temp'\n", FILE_APPEND);
+            }
 
-        if (!$process->isSuccessful()) {
-            // Limpieza antes de lanzar error
-            foreach ($tempFiles as $f) @unlink($f);
-            @unlink($listFile);
-            @unlink($outputFile);
-            throw new \Exception('Error al concatenar audio con FFmpeg: ' . $process->getErrorOutput());
+            // Ejecutar FFmpeg con ruta absoluta
+            $command = "\"$ffmpegPath\" -f concat -safe 0 -i \"$listFile\" -c copy \"$outputFile\" 2>&1";
+            
+            exec($command, $output, $returnCode);
+
+            if ($returnCode !== 0) {
+                throw new \Exception('Error al concatenar con FFmpeg: ' . implode("\n", $output));
+            }
+
+            if (!file_exists($outputFile)) {
+                throw new \Exception('FFmpeg no generó el archivo de salida.');
+            }
+
+            $finalAudio = file_get_contents($outputFile);
+
+        } finally {
+            // Siempre limpiar archivos temporales
+            foreach ($tempFiles as $file) {
+                if (file_exists($file)) @unlink($file);
+            }
+            if (file_exists($listFile)) @unlink($listFile);
+            if (file_exists($outputFile)) @unlink($outputFile);
         }
-
-        $finalAudio = file_get_contents($outputFile);
-
-        // Limpieza
-        foreach ($tempFiles as $f) @unlink($f);
-        @unlink($listFile);
-        @unlink($outputFile);
 
         return $finalAudio;
     }

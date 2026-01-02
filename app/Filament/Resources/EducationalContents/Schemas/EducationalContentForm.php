@@ -50,7 +50,7 @@ class EducationalContentForm
                                         ->label('Título del contenido')
                                         ->required()
                                         ->maxLength(255)
-                                        ->live(debounce: 500)
+                                        ->live(onBlur: true)
                                         ->afterStateUpdated(fn ($state, Set $set) => $set('slug', Str::slug($state))),
 
                                     TextInput::make('slug')
@@ -217,6 +217,7 @@ class EducationalContentForm
                                         
                                     Repeater::make('activities')
                                         ->relationship('activities')
+                                        ->orderColumn('activity_order')
                                         ->schema(self::getActivitySchema())
                                         ->collapsible()
                                         ->label('Actividades interactivas')
@@ -290,8 +291,12 @@ class EducationalContentForm
 
                                     Repeater::make('activities')
                                         ->label('Actividades del Artículo')
-                                        ->relationship('activities') // MorphMany
+                                        ->relationship('activities')
+                                        ->orderColumn('activity_order') // MorphMany
                                         ->schema(self::getActivitySchema())
+                                        ->defaultItems(0)
+                                        ->addActionLabel('Añadir nueva actividad')
+                                        ->reorderableWithButtons()
                                         ->collapsible(),
                                 ]),
                         ]),
@@ -319,13 +324,15 @@ class EducationalContentForm
                       
                 ])
                 ->columnSpanFull()
-                  ->submitAction(
-                        Action::make('save')
+                ->submitAction(
+                    Action::make('save')
                         ->label('Guardar')
-                        ->button()
+                        ->submit('save')
                         ->color('primary')
                         ->icon('heroicon-o-folder-open')
-                    ),
+
+                        
+                    )
             ]);
     }
 

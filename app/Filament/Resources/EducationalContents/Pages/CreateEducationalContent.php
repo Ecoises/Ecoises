@@ -8,6 +8,7 @@ use App\Models\CourseDetails;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Filament\Notifications\Notification;
 
 class CreateEducationalContent extends CreateRecord
 {
@@ -16,6 +17,22 @@ class CreateEducationalContent extends CreateRecord
     protected function getFormActions(): array
     {
         return [];
+    }
+
+    protected function getCreatedNotification(): ?Notification
+    {
+        return Notification::make()
+            ->success()
+            ->title('¡Guardado exitoso!')
+            ->body('Contenido educativo creado correctamente')
+            ->icon('heroicon-o-check-badge')
+            ->duration(5000)
+            ->send();
+    }
+
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('index');
     }
 
     protected function handleRecordCreation(array $data): Model

@@ -93,6 +93,7 @@ class EducationalContentInfolist
                                         
                                      TextEntry::make('audio_url')
                                         ->label('Audio de esta lección')
+                                        
                                         ->formatStateUsing(fn (?string $state): ?HtmlString => $state ? new HtmlString(
                                             '<audio controls class="w-full max-w-md">
                                                 <source src="' . $state . '" type="audio/mpeg">
@@ -104,6 +105,8 @@ class EducationalContentInfolist
                                     Section::make('Actividades de Aprendizaje')
                                     ->description('Actividades prácticas asociadas a este contenido')
                                     ->icon('heroicon-o-puzzle-piece')
+                                   
+                                    ->collapsed()
                                     ->visible(fn ($record) => $record->activities()->exists())
                                     ->schema([
                                         RepeatableEntry::make('activities')

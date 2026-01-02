@@ -7,6 +7,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Filament\Notifications\Notification;
 
 class EditEducationalContent extends EditRecord
 {
@@ -17,6 +18,23 @@ class EditEducationalContent extends EditRecord
         return [
             DeleteAction::make(),
         ];
+    }
+
+    protected function getSavedNotification(): ?Notification
+    {
+        return Notification::make()
+            ->success()
+            ->title('¡Actualizado!')
+            ->body('Contenido educativo actualizado correctamente')
+            ->icon('heroicon-o-check-badge')
+            ->duration(5000)
+            ->send();
+    }
+
+    // Redirecciona al listado después de guardar
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('index');
     }
 
     protected function mutateFormDataBeforeFill(array $data): array
