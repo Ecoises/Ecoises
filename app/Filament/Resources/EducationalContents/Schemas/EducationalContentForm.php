@@ -350,53 +350,74 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
     $dot = filled($prefix) ? '.' : '';
 
     return Section::make('Audio Narrado')
-        ->description('Se procesará en segundo plano y te notificaremos al terminar.')
+        ->description('Genera una versión en audio profesional de tu contenido.')
         ->icon('heroicon-o-speaker-wave')
         ->collapsed()
         ->schema([
             ToggleButtons::make("{$prefix}{$dot}voice_id")
-                ->options(['Charon' => 'Mauricio', 'Aoede' => 'Luisa', 'Puck' => 'Faraón'])
-                ->default('Charon')->inline()->live(),
+                ->label('Selecciona una voz')
+                ->options([
+                    'Charon' => 'Mauricio',
+                    'Aoede' => 'Luisa',
+                    'Puck' => 'Faraón'
+                ])
+                ->default('Charon')
+                ->inline()
+                ->live(),
             
             Hidden::make("{$prefix}{$dot}audio_url")->live(),
             Hidden::make("{$prefix}{$dot}audio_timestamps"),
         ])
         ->footerActions([
-            MediaAction::make('listen')->label('Escuchar')->icon('heroicon-o-play')
+            MediaAction::make('listen')
+                ->label('Escuchar')
+                ->icon('heroicon-o-play')
+                ->color('secondary')
                 ->visible(fn(Get $get) => filled($get("{$prefix}{$dot}audio_url")))
                 ->media(fn(Get $get) => $get("{$prefix}{$dot}audio_url"))
                 ->mediaType(MediaAction::TYPE_AUDIO),
 
             Action::make('generate')
-                ->label('Generar ahora')
-                ->action(function (Get $get, $record, $livewire) use ($prefix, $dot) {
+                ->label('Generar audio')
+                ->icon('heroicon-m-speaker-wave')
+                ->color('primary')
+                ->modalHeading('Generar audio narrado')
+                ->modalDescription('Se generará la narración en segundo plano. Debes guardar el contenido antes de generar audio. ¿Continuar?')
+                ->modalSubmitActionLabel('Generar')
+                ->requiresConfirmation()
+                ->action(function (Get $get, $record) use ($prefix, $dot) {
                     $text = strip_tags($get(filled($prefix) ? "{$prefix}.content_text" : "content_text") ?? '');
                     
                     if (blank($text)) {
-                        Notification::make()->title('Escribe texto primero')->danger()->send();
+                        Notification::make()
+                            ->title('No hay contenido')
+                            ->body('Escribe el contenido antes de generar audio.')
+                            ->warning()
+                            ->send();
                         return;
                     }
 
-                    // CORRECCIÓN CRÍTICA: Obtener el modelo correcto
+                    // Determinar el modelo y contexto
                     $target = null;
+                    $contextInfo = [];
                     
                     if ($prefix === 'article_details') {
-                        // Para artículos: usar el EducationalContent directamente
-                        $target = $record;
-                    } else {
-                        // Para lecciones: necesitamos obtener la lección específica del repeater
-                        // Esto es complicado en Filament, mejor enfoque:
-                        
-                        // Opción 1: Si ya existe la lección (editando)
-                        if (isset($livewire->data['lessons'])) {
-                            $lessonData = collect($livewire->data['lessons'])->firstWhere('id', $get('id'));
-                            if ($lessonData && isset($lessonData['id'])) {
-                                $target = \App\Models\Lesson::find($lessonData['id']);
-                            }
+                        if (!$record || !$record->exists) {
+                            Notification::make()
+                                ->title('Guarda el artículo primero')
+                                ->body('Debes guardar el contenido antes de generar audio.')
+                                ->warning()
+                                ->send();
+                            return;
                         }
-                        
-                        // Si no encontramos la lección, mostrar error
-                        if (!$target) {
+                        $target = $record;
+                        $contextInfo = [
+                            'type' => 'article',
+                            'title' => $record->title,
+                        ];
+                    } else {
+                        $lessonId = $get('id');
+                        if (!$lessonId) {
                             Notification::make()
                                 ->title('Guarda la lección primero')
                                 ->body('Debes guardar el contenido antes de generar audio.')
@@ -404,22 +425,32 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                                 ->send();
                             return;
                         }
+                        
+                        $target = \App\Models\Lesson::find($lessonId);
+                        if ($target) {
+                            $contextInfo = [
+                                'type' => 'lesson',
+                                'lesson_title' => $target->title,
+                                'course_title' => $target->educationalContent->title ?? 'Curso',
+                            ];
+                        }
                     }
 
-                    // Dispatch del Job con el modelo correcto
+                    $voiceId = $get("{$prefix}{$dot}voice_id") ?? 'Charon';
+
                     \App\Jobs\ProcessAudioFull::dispatch(
                         $target, 
                         $text, 
-                        $get("{$prefix}{$dot}voice_id") ?? 'Charon', 
+                        $voiceId, 
                         auth()->user(), 
-                        $prefix
+                        $prefix,
+                        $contextInfo
                     );
 
                     Notification::make()
                         ->title('Generando audio...')
-                        ->body('Estamos procesando la narración. Te notificaremos cuando esté lista.')
-                        ->icon('heroicon-o-arrow-path')
-                        ->iconColor('info') 
+                        ->body('Te notificaremos cuando esté listo.')
+                        ->info()
                         ->send();
                 }),
         ]);
