@@ -54,5 +54,11 @@ return [
         'base_url' => env('WIKIPEDIA_BASE_URL', 'https://es.wikipedia.org/api/rest_v1'),
         'timeout' => (int) env('WIKIPEDIA_TIMEOUT', 15),
     ],
+    'google' => [
+        'gemini_key' => env('GOOGLE_AI_STUDIO_KEY'),
+    ],
+    'elevenlabs' => [
+        'api_key' => env('ELEVENLABS_API_KEY'),
+    ],
 
 ];

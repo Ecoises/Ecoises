@@ -13,6 +13,8 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\ImageEntry;
+use Illuminate\Support\HtmlString;
+
 
 
 
@@ -93,7 +95,7 @@ class EducationalContentInfolist
                                         
                                      TextEntry::make('audio_url')
                                         ->label('Audio de esta lección')
-                                        
+                                        ->visible(fn (?string $state): bool => !empty($state))
                                         ->formatStateUsing(fn (?string $state): ?HtmlString => $state ? new HtmlString(
                                             '<audio controls class="w-full max-w-md">
                                                 <source src="' . $state . '" type="audio/mpeg">
