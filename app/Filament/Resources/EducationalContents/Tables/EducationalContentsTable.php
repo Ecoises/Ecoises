@@ -35,7 +35,7 @@ class EducationalContentsTable
                     ->searchable()
                     ->sortable()
                     ->limit(50)
-                    ->description(fn (EducationalContent $record): string => $record->description ? strip_tags(substr($record->description, 0, 100)).'...' : ''
+                    ->description(fn (EducationalContent $record): string => $record->description ? strip_tags(substr($record->description, 0, 50)).'...' : ''
                     ),
 
                 Tables\Columns\TextColumn::make('content_type')
@@ -44,7 +44,7 @@ class EducationalContentsTable
                     ->formatStateUsing(fn (string $state): string => EducationalContent::getTypes()[$state] ?? $state
                     )
                     ->color(fn (string $state): string => match ($state) {
-                        EducationalContent::TYPE_COURSE => 'primary',
+                        EducationalContent::TYPE_COURSE => 'success',
                         EducationalContent::TYPE_ARTICLE => 'info',
                         default => 'gray',
                     })
@@ -57,7 +57,7 @@ class EducationalContentsTable
                 Tables\Columns\TextColumn::make('categories.name')
                     ->label('Categoría')
                     ->badge()
-                    ->separator(',')
+                     ->listWithLineBreaks()
                     ->sortable()
                     ->searchable()
                     ->toggleable(),

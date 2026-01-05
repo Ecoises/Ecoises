@@ -15,12 +15,12 @@ class TotalViewsWidget extends StatsOverviewWidget
         $totalViews = EducationalContent::sum('view_count') ?? 0;
 
         return [
-            // 2. Ahora sí podemos usar la variable $totalViews
             Stat::make('Vistas Totales', number_format($totalViews))
                 ->icon('heroicon-o-eye')
-                ->description('Interacción de usuarios')
-                ->descriptionIcon('heroicon-m-cursor-arrow-rays')
-                ->color('success')
+                ->description($totalViews === 0 ? 'Sin interacción de usuarios' : 'Interacción de usuarios')
+                ->descriptionIcon($totalViews === 0 ? 'heroicon-m-arrow-trending-down' : 'heroicon-m-cursor-arrow-rays')
+                ->descriptionColor($totalViews === 0 ? 'danger' : null)
+                ->color($totalViews === 0 ? 'gray' : 'success')
                 ->chart([7, 4, 10, 15, 12, 17, 21]),
         ];
     }

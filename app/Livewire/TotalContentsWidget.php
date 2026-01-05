@@ -16,14 +16,14 @@ class TotalContentsWidget extends StatsOverviewWidget
         $total = EducationalContent::count() ?? 0;
     
         $ultimoMes = EducationalContent::where('created_at', '>=', Carbon::now()->subMonth())->count();
-
+        
         return [
             Stat::make('Total de Contenidos', $total)
-            ->icon('heroicon-o-document-text')
-            ->color('success')
-            ->description($ultimoMes . ' creados este mes')
-            ->descriptionIcon('heroicon-m-arrow-trending-up'),
-            
+                ->icon('heroicon-o-document-text')
+                ->color('success')
+                ->description($ultimoMes . ' creados este mes')
+                ->descriptionIcon($ultimoMes === 0 ? 'heroicon-m-arrow-trending-down' : 'heroicon-m-arrow-trending-up')
+                ->descriptionColor($ultimoMes === 0 ? 'danger' : null),
         ];
     }
 }

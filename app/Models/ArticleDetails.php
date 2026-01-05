@@ -29,10 +29,32 @@ class ArticleDetails extends Model
 
     protected $casts = [
         'audio_timestamps' => 'array',
-        'audio_timestamps' => 'array',
         'related_taxa' => 'array',
         'references' => 'array',
     ];
+
+    // App\Models\ArticleDetails.php
+
+    protected static function booted()
+    {
+        static::saving(function ($details) {
+            // Al guardar un Artículo, actualiza su propio tiempo
+            if ($details->isDirty('content_text')) {
+                $words = str_word_count(strip_tags($details->content_text));
+                $details->word_count = $words;
+                $details->read_time = (int) ceil($words / 200);
+            }
+        });
+
+        static::saved(function ($details) {
+            // Y actualiza el tiempo de su padre (EducationalContent)
+            if ($details->content) {
+                $details->content->update([
+                    'estimated_duration' => $details->read_time
+                ]);
+            }
+        });
+    }
 
     public function content(): BelongsTo
     {

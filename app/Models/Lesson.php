@@ -37,10 +37,8 @@ class Lesson extends Model
     protected $casts = [
         'is_mandatory' => 'boolean',
         'unlock_requirements' => 'array',
-        'is_published' => 'boolean',
         'audio_timestamps' => 'array',
         'is_published' => 'boolean',
-        'audio_timestamps' => 'array',
         'references' => 'array',
     ];
 
@@ -50,6 +48,33 @@ class Lesson extends Model
         $words = str_word_count(strip_tags($text));
         $wpm = 200;
         return max(1, (int) ceil(($words / $wpm) * 60));
+    }
+   
+
+   protected static function booted()
+    {
+        // Al guardar la lección, avisa al Contenido Educativo (Padre) 
+        // para que sume el tiempo de todas sus lecciones.
+        static::saved(function ($lesson) {
+            $lesson->syncParentDuration();
+        });
+
+        // También al borrar, para que el tiempo del padre baje
+        static::deleted(function ($lesson) {
+            $lesson->syncParentDuration();
+        });
+    }
+
+    public function syncParentDuration()
+    {
+        // Accedemos a la relación 'content' (EducationalContent)
+        if ($this->content) {
+            $totalMinutes = $this->content->lessons()->sum('estimated_duration');
+            
+            $this->content->update([
+                'estimated_duration' => $totalDuration
+            ]);
+        }
     }
 
     // Relationships

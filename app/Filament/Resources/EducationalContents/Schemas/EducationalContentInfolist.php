@@ -194,14 +194,15 @@ class EducationalContentInfolist
                             ->color('primary')
                             ->formatStateUsing(fn (string $state): string => ucwords($state)),
 
-                            TextEntry::make('categories.name')
-                            ->label('Categoria')
-                            ->badge()
-                            ->color('primary'),
+                            
 
                             
                         ])
                         ->columns(2), 
+                        TextEntry::make('categories.name')
+                            ->label('Categorías')
+                            ->badge()
+                            ->color('primary'),
                         TextEntry::make('tags')
                             ->label('Etiquetas')
                             ->badge()
