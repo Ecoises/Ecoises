@@ -27,6 +27,15 @@ Route::prefix('taxa')->group(function () {
      // Listar especies de un lugar específico
 });
 
+// Rutas de Contenido Educativo
+use App\Http\Controllers\Api\EducationalContentController;
+
+Route::prefix('educational-contents')->group(function () {
+    Route::get('/', [EducationalContentController::class, 'index']);
+    Route::get('/{id}', [EducationalContentController::class, 'show']);
+});
+
+
 
 
 // Rutas protegidas (requieren autenticación)

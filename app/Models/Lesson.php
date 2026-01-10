@@ -72,7 +72,7 @@ class Lesson extends Model
             $totalMinutes = $this->content->lessons()->sum('estimated_duration');
             
             $this->content->update([
-                'estimated_duration' => $totalDuration
+                'estimated_duration' => $totalMinutes
             ]);
         }
     }
