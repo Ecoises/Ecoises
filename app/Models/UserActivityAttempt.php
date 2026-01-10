@@ -51,7 +51,7 @@ class UserActivityAttempt extends Model
 
     public function activity(): BelongsTo
     {
-        return $this->belongsTo(LessonActivity::class);
+        return $this->belongsTo(Activity::class);
     }
 
     public function lessonProgress(): BelongsTo

@@ -74,6 +74,16 @@ class EducationalContentController extends Controller
                 
                 $content->lesson_progress = $lessonProgress;
             }
+
+            // Get user's successful activity attempts to mark as completed
+            $activityIds = $content->lessons->pluck('activities')->flatten()->pluck('id');
+            $completedActivities = \App\Models\UserActivityAttempt::where('user_id', $user->id)
+                ->whereIn('activity_id', $activityIds)
+                ->where('is_correct', true)
+                ->pluck('activity_id')
+                ->toArray();
+
+            $content->completed_activities = $completedActivities;
         }
 
         return response()->json($content);
