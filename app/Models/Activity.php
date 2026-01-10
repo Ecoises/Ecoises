@@ -39,8 +39,42 @@ class Activity extends Model
         'is_mandatory' => 'boolean',
     ];
 
+    protected $appends = [
+        'options',
+        'is_true',
+        'true_false_feedback',
+        'items',
+        'pairs',
+    ];
+
     public function activitable(): MorphTo
     {
         return $this->morphTo();
+    }
+
+    // Accessors to flatten content_data
+    public function getOptionsAttribute()
+    {
+        return $this->content_data['options'] ?? null;
+    }
+
+    public function getIsTrueAttribute()
+    {
+        return $this->content_data['is_true'] ?? null;
+    }
+
+    public function getTrueFalseFeedbackAttribute()
+    {
+        return $this->content_data['true_false_feedback'] ?? null;
+    }
+
+    public function getItemsAttribute()
+    {
+        return $this->content_data['items'] ?? null;
+    }
+
+    public function getPairsAttribute()
+    {
+        return $this->content_data['pairs'] ?? null;
     }
 }

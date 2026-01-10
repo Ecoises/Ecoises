@@ -46,7 +46,9 @@ class UserForm
                             ->label('Avatar')
                             ->image()
                             ->imageEditor()
+                            ->disk('public')
                             ->directory('avatars')
+                            ->visibility('public')
                             ->maxSize(2048)
                             ->helperText('Imagen de perfil (máx. 2MB)'),
                         

@@ -35,6 +35,12 @@ Route::prefix('educational-contents')->group(function () {
     Route::get('/{id}', [EducationalContentController::class, 'show']);
 });
 
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/educational-contents/{id}/start', [EducationalContentController::class, 'start']);
+    Route::post('/lessons/{id}/complete', [\App\Http\Controllers\Api\LessonController::class, 'complete']);
+    Route::post('/activities/{id}/attempt', [\App\Http\Controllers\Api\ActivityController::class, 'attempt']);
+});
+
 
 
 

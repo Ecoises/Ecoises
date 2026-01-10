@@ -8,6 +8,13 @@ use Illuminate\Http\Request;
 
 class EducationalContentController extends Controller
 {
+    protected $progressService;
+
+    public function __construct(\App\Services\ContentProgressService $progressService)
+    {
+        $this->progressService = $progressService;
+    }
+
     /**
      * Display a listing of the published educational contents.
      */
@@ -41,13 +48,51 @@ class EducationalContentController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show($id)
+    public function show($slugOrId)
     {
-        $content = EducationalContent::where('status', 'published')
-            ->where('is_published', true)
-            ->with(['categories', 'lessons', 'author', 'articleDetails', 'courseDetails'])
-            ->findOrFail($id);
+        // Try to find by slug first, then by ID for backwards compatibility
+        $content = EducationalContent::where('slug', $slugOrId)
+            ->orWhere('id', $slugOrId)
+            ->with(['categories', 'lessons.activities', 'author', 'articleDetails', 'courseDetails'])
+            ->firstOrFail();
+
+        // If user is authenticated, attach enrollment and progress
+        if (auth()->check()) {
+            $user = auth()->user();
+            
+            $enrollment = $user->contentEnrollments()
+                ->where('content_id', $content->id)
+                ->first();
+            
+            if ($enrollment) {
+                $content->enrollment = $enrollment;
+                
+                // Get lesson progress for this enrollment
+                $lessonProgress = $enrollment->lessonProgress()
+                    ->get()
+                    ->keyBy('lesson_id');
+                
+                $content->lesson_progress = $lessonProgress;
+            }
+        }
 
         return response()->json($content);
+    }
+
+    /**
+     * Iniciar el contenido (Inscripción).
+     */
+    public function start($slugOrId)
+    {
+        $user = auth()->user();
+        
+        // Try to find by slug first, then by ID
+        $content = EducationalContent::where('slug', $slugOrId)
+            ->orWhere('id', $slugOrId)
+            ->firstOrFail();
+
+        $enrollment = $this->progressService->startContent($user, $content);
+
+        return response()->json($enrollment);
     }
 }

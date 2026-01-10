@@ -160,6 +160,9 @@ class EducationalContentForm
                                     RichEditor::make('content_text')
                                     ->label('Contenido de la Lección')
                                     ->required()
+                                    ->fileAttachmentsDisk('public')
+                                    ->fileAttachmentsDirectory('content/lessons')
+                                    ->fileAttachmentsVisibility('public')
                                     ->live(onBlur: true)
                                     ->helperText(function (?string $state): string {
                                         // Mantenemos tu lógica de cálculo para el texto de ayuda
@@ -246,6 +249,9 @@ class EducationalContentForm
                                             return "Aquí puedes redactar el contenido educativo detallado para el artículo. Estimación: {$minutes} min de lectura ({$words} palabras).";
                                         })
                                         ->required()
+                                        ->fileAttachmentsDisk('public')
+                                        ->fileAttachmentsDirectory('content/articles')
+                                        ->fileAttachmentsVisibility('public')
                                         ->live(onBlur: true)
                                         ->afterStateUpdated(function (Set $set, ?string $state) { // El ? permite que sea nulo
                                             // 1. Verificamos si hay texto, si no, ponemos 0 o 1
