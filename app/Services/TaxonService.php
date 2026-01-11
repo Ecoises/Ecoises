@@ -18,13 +18,20 @@ class TaxonService
      * @var INaturalistService
      */
     protected $iNaturalistService;
+
+    /**
+     * @var Api\GbifService
+     */
+    protected $gbifService;
     
     /**
      * @param INaturalistService $iNaturalistService
+     * @param Api\GbifService $gbifService
      */
-    public function __construct(INaturalistService $iNaturalistService)
+    public function __construct(INaturalistService $iNaturalistService, Api\GbifService $gbifService)
     {
         $this->iNaturalistService = $iNaturalistService;
+        $this->gbifService = $gbifService;
     }
     
     /**
@@ -751,7 +758,19 @@ class TaxonService
             $taxon->species = $ancestry['species'] ?? null;
 
             // Fetch status específico (place_id configurado)
-            $colombiaStatus = $this->getEstablishmentStatus($taxonData['id'] ?? null);
+            // OPTIMIZACIÓN: Usar datos ya presentes en $taxonData para evitar N+1
+            $colombiaStatus = $taxonData['preferred_establishment_means'] 
+                ?? $taxonData['establishment_means'] 
+                ?? null;
+                
+            // Si el status es un array (caso raro en data normalizada pero posible en raw), intentar extraer
+            if (is_array($colombiaStatus)) {
+                $colombiaStatus = $colombiaStatus['establishment_means'] ?? $colombiaStatus[0]['establishment_means'] ?? null;
+            }
+
+            // Fallback: Solo llamar a getEstablishmentStatus si es CRÍTICO y no tenemos data (evitar en bucles)
+            // $colombiaStatus = $colombiaStatus ?? $this->getEstablishmentStatus($taxonData['id'] ?? null);
+
             $flags = $this->mapEstablishmentMeans($colombiaStatus);
             $taxon->is_native = $flags['is_native'];
             $taxon->is_endemic = $flags['is_endemic'];
@@ -1218,126 +1237,199 @@ public function mapEstablishmentMeans(?string $status): array
      * @param array $filters
      * @return array
      */
+
+    /**
+     * Hybrid Approach: GBIF (List) -> iNaturalist (Enrichment)
+     * 1. Get species list from GBIF based on location filters.
+     * 2. Check local DB for known data.
+     * 3. Enrich missing data from iNaturalist (Batch/Parallel).
+     * 4. Filter out species without photos (Strict Requirement).
+     */
     public function getColombiaSpecies(array $filters = []): array
     {
-        $orderBy = $filters['order_by'] ?? 'observations_count';
-        
-        Log::info('TaxonService: getColombiaSpecies called', [
-            'filters' => $filters,
-            'order_by' => $orderBy
-        ]);
+        $start = microtime(true);
+        Log::info('🚀 Arrancando Hybrid Search', ['filters' => $filters]);
 
         try {
-            // Si es modo aleatorio, usar la base de datos local
-            if ($orderBy === 'random') {
-                return $this->getRandomSpeciesFromDatabase($filters);
-            }
+            // FAST PATH: If filters require establishment/threatened flags, use iNaturalist species_counts
+            $wantsNative = !empty($filters['native']);
+            $wantsEndemic = !empty($filters['endemic']);
+            $wantsThreatened = !empty($filters['threatened']);
 
-            // Modo normal: usar API de iNaturalist
-            $placeId = config('services.inaturalist.place_id', 7196);
+            if ($wantsNative || $wantsEndemic || $wantsThreatened) {
+                $inatParams = [
+                    'per_page' => $filters['per_page'] ?? 24,
+                    'page' => $filters['page'] ?? 1,
+                    'place_id' => config('services.inaturalist.place_id', 7196),
+                    // Keep photos and verifiable defaults from INaturalistService->getSpeciesCounts
+                ];
 
-            $apiFilters = array_merge($filters, [
-                'place_id' => $placeId,
-                'order_by' => 'observations_count',
-                'order' => 'desc',
-                'has' => ['photos'],
-                'rank' => 'species',
-                'is_active' => 'true',
-                'per_page' => $filters['per_page'] ?? 24, 
-                'page' => $filters['page'] ?? 1,
-            ]);
+                $countsResult = $this->iNaturalistService->getSpeciesCounts($inatParams);
 
-            $apiFilters['place_id'] = $placeId;
-
-            // Mapear filtros
-            if (isset($filters['native']) && $filters['native']) $apiFilters['native'] = 'true';
-            if (isset($filters['endemic']) && $filters['endemic']) $apiFilters['endemic'] = 'true';
-            if (isset($filters['threatened']) && $filters['threatened']) $apiFilters['threatened'] = 'true';
-            
-            $classMap = [
-                'Aves' => 3,
-                'Mammalia' => 40151,
-                'Reptilia' => 26036,
-                'Amphibia' => 20978,
-                'Insecta' => 47158,
-                'Plantae' => 47126,
-                'Fungi' => 47170
-            ];
-
-            if (isset($filters['rank']) && $filters['rank'] !== 'Todas') {
-                 if (isset($classMap[$filters['rank']])) {
-                     $apiFilters['taxon_id'] = $classMap[$filters['rank']];
-                 } else {
-                     if (empty($filters['q'])) {
-                         $apiFilters['q'] = $filters['rank'];
-                     }
-                 }
-            }
-
-            if (empty($filters['q'])) {
-                $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
-            } else {
-                if (isset($apiFilters['q'])) {
-                    $apiFilters['taxon_name'] = $apiFilters['q'];
+                if (!$countsResult['success']) {
+                    return [
+                        'success' => false,
+                        'error' => $countsResult['error'] ?? ['message' => 'Error al obtener species_counts de iNaturalist'],
+                        'source' => 'api'
+                    ];
                 }
-                $apiResult = $this->iNaturalistService->getSpeciesCounts($apiFilters);
-            }
 
-            if (!$apiResult['success']) {
-                Log::error('Error al obtener especies de Colombia', [
-                    'filters' => $filters,
-                    'error' => $apiResult['error'] ?? 'Error desconocido'
-                ]);
+                $items = $countsResult['data'] ?? [];
+
+                // Server-side post-filters based on normalized flags
+                $filtered = collect($items)->filter(function ($t) use ($wantsNative, $wantsEndemic, $wantsThreatened) {
+                    // threatened: conservation_status IUCN CR/EN/VU
+                    $isThreatened = false;
+                    if (!empty($t['conservation_status']['status'])) {
+                        $status = strtoupper($t['conservation_status']['status']);
+                        $isThreatened = in_array($status, ['CR', 'EN', 'VU']);
+                    }
+
+                    if ($wantsNative && empty($t['native'])) return false;
+                    if ($wantsEndemic && empty($t['endemic'])) return false;
+                    if ($wantsThreatened && !$isThreatened) return false;
+                    return true;
+                })->values()->all();
+
+                // Light payload for list: drop heavy arrays if any
+                $light = collect($filtered)->map(function ($taxon) {
+                    // Ensure minimal shape for list cards
+                    unset($taxon['gallery']);
+                    unset($taxon['ancestors']);
+                    unset($taxon['conservation_statuses']);
+                    return $taxon;
+                })->toArray();
 
                 return [
-                    'success' => false,
-                    'error' => $apiResult['error'] ?? ['message' => 'Error al obtener especies de Colombia'],
-                    'source' => 'api',
+                    'success' => true,
+                    'data' => $light,
+                    'pagination' => $countsResult['pagination'] ?? [
+                        'page' => $filters['page'] ?? 1,
+                        'per_page' => $filters['per_page'] ?? 24,
+                        'total' => count($light),
+                    ],
+                    'cached' => $countsResult['cached'] ?? false,
+                    'source' => 'inat_species_counts',
                 ];
             }
 
-            // Procesar y guardar los resultados
-            $savedTaxa = [];
-            if (isset($apiResult['data']) && is_array($apiResult['data'])) {
-                foreach ($apiResult['data'] as $taxonData) {
-                    $savedTaxon = $this->createOrUpdateTaxonFromApiData($taxonData);
-                    if ($savedTaxon) {
-                        $savedTaxa[] = $savedTaxon;
+            // STEP 1: Get raw list from GBIF
+            // This handles Country, Dept, Municipality filters natively
+            $gbifResult = $this->gbifService->getSpeciesList($filters);
+
+            if (!$gbifResult['success'] || empty($gbifResult['data'])) {
+                Log::info('⚠️ GBIF returned no results', ['filters' => $filters]);
+                return [
+                    'success' => true,
+                    'data' => [],
+                    'pagination' => ['total' => 0, 'page' => 1]
+                ];
+            }
+
+            $speciesList = $gbifResult['data']; // Array of ['scientific_name' => '...', 'source_id' => '...']
+            $namesToEnrich = collect($speciesList)->pluck('scientific_name')->unique()->values()->toArray();
+
+            // STEP 2: Enrichment Strategy (Avoid N+1)
+            // Strategy: Check Local DB -> If missing, Search iNat ONLY for matches
+            
+            $finalTaxa = [];
+            $missingInLocal = [];
+
+            // 2a. Check Local DB with eager loading
+            $localTaxa = Taxa::with('apiReferences')
+                ->whereIn('scientific_name', $namesToEnrich)
+                ->get()
+                ->keyBy('scientific_name');
+
+            foreach ($speciesList as $sp) {
+                $name = $sp['scientific_name'];
+                if ($localTaxa->has($name)) {
+                    $taxon = $localTaxa->get($name);
+                    // Check if complete enough (must have photo)
+                    $enrichedData = $taxon->enriched_data;
+                    if (!empty($enrichedData['default_photo']['url'] ?? null)) {
+                         $finalTaxa[] = $enrichedData;
                     }
+                } else {
+                    $missingInLocal[$name] = $sp; // Queue for iNat check
                 }
             }
 
-            $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
-
-            $pagination = $apiResult['pagination'] ?? [
-                'total' => count($formattedTaxa),
-                'per_page' => $filters['per_page'] ?? 24,
-                'page' => $filters['page'] ?? 1,
-            ];
+            // 2b. Batch Process Missing Species via iNaturalist
+            // Issue: iNat API doesn't have a "search by list of names" endpoint easily.
+            // We have to iterate, BUT we can do it smarter or limit the "new" ones per page.
             
-            $perPage = $pagination['per_page'] ?? 24;
-            $total = $pagination['total'] ?? 0;
-            $pagination['last_page'] = $perPage > 0 ? (int)ceil($total / $perPage) : 1;
-            $pagination['current_page'] = $pagination['page'] ?? 1;
+            // Limit enrichment to avoid timeouts on fresh searches
+            $limitNew = 10; 
+            $processed = 0;
+
+            foreach ($missingInLocal as $name => $gbifData) {
+                if ($processed >= $limitNew) break; // Throttle upstream calls
+
+                // Search iNat by Exact Name
+                // We assume strict match to avoid showing wrong species
+                
+                // Check cache first to avoid hitting iNat for "No Result" repeatedly
+                $noPhotoCacheKey = 'inat_no_photo_' . md5($name);
+                if (Cache::has($noPhotoCacheKey)) {
+                    continue; // Skip, we already know it has no photo
+                }
+
+                try {
+                    // Search iNaturalist for this specific name
+                    $iNatResult = $this->iNaturalistService->searchTaxon($name, [
+                        'per_page' => 1,
+                        'rank' => 'species'
+                    ]);
+
+                    if ($iNatResult['success'] && !empty($iNatResult['data'])) {
+                        $bestMatch = $iNatResult['data'][0];
+
+                        // Verify Name Match using normalized key
+                        $bestSciName = $bestMatch['scientific_name'] ?? null;
+                        if ($bestSciName && stripos($bestSciName, $name) !== false) {
+
+                            // CHECK PHOTO REQUIREMENT
+                            $hasPhoto = !empty($bestMatch['default_photo']) && !empty($bestMatch['default_photo']['url']);
+
+                            if ($hasPhoto) {
+                                // Save to DB
+                                $savedTaxon = $this->createOrUpdateTaxonFromApiData($bestMatch);
+                                if ($savedTaxon) {
+                                    $finalTaxa[] = $savedTaxon->enriched_data;
+                                }
+                            } else {
+                                // Cache "No Photo" state for 7 days
+                                Cache::put($noPhotoCacheKey, true, 86400 * 7);
+                            }
+                        }
+                    } else {
+                        // Cache "Not Found" state
+                        Cache::put($noPhotoCacheKey, true, 86400 * 7);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Error enriching ' . $name, ['error' => $e->getMessage()]);
+                }
+                $processed++;
+            }
+
+            // Pagination from GBIF result (approximate)
+            $pagination = $gbifResult['pagination'] ?? [];
+            $pagination['current_page'] = $filters['page'] ?? 1;
 
             return [
                 'success' => true,
-                'data' => $formattedTaxa,
+                'data' => $finalTaxa,
                 'pagination' => $pagination,
-                'cached' => false,
-                'source' => 'api',
+                'source' => 'hybrid_gbif_inat'
             ];
 
         } catch (\Exception $e) {
-            Log::error('Excepción al obtener especies de Colombia: ' . $e->getMessage(), [
-                'filters' => $filters,
-                'trace' => $e->getTraceAsString()
-            ]);
-
+            Log::error('Hybrid Search Failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             return [
                 'success' => false,
-                'error' => ['message' => 'Error inesperado al obtener especies de Colombia: ' . $e->getMessage()],
-                'source' => 'api',
+                'error' => ['message' => 'Error getting species list: ' . $e->getMessage()],
+                'source' => 'hybrid_fail'
             ];
         }
     }
@@ -1352,7 +1444,7 @@ public function mapEstablishmentMeans(?string $status): array
             $page = $filters['page'] ?? 1;
 
             // Construir query base
-            $query = Taxon::query()
+            $query = Taxa::query()
                 ->where('rank', 'species')
                 ->whereNotNull('default_photo_id');
 

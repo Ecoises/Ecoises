@@ -430,7 +430,11 @@ class INaturalistService extends BaseApiService
             'params' => $params
         ]);
 
-        $response = $this->makeRequest('get', '/observations/species_counts', $params, true);
+        // Cache short-term to reduce latency under pagination/navigation
+        $cacheKey = 'inat_species_counts_' . md5(json_encode($params));
+        $response = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($params) {
+            return $this->makeRequest('get', '/observations/species_counts', $params, true);
+        });
 
         if (!$response['success']) {
             return $response;
@@ -443,9 +447,10 @@ class INaturalistService extends BaseApiService
             // Result structure is { count: X, taxon: { ... } }
             if (isset($result['taxon'])) {
                 try {
-                    $taxon = $this->normalizeTaxonData($result['taxon']);
+                    // Use lightweight normalizer to avoid heavy fields (gallery, ancestors, etc.)
+                    $taxon = $this->normalizeTaxonDataLight($result['taxon']);
                     // Inject observation count from this endpoint if useful
-                    $taxon['observations_count'] = $result['count'] ?? 0; 
+                    $taxon['observations_count'] = $result['count'] ?? 0;
                     $normalizedResults[] = $taxon;
                 } catch (\Exception $e) {
                     continue;
@@ -463,6 +468,41 @@ class INaturalistService extends BaseApiService
             ],
             'cached' => $response['cached'] ?? false,
             'api' => $this->apiName,
+        ];
+    }
+    
+    /**
+     * Lightweight normalizer for list views (species_counts)
+     * Keeps only essential fields to render cards quickly
+     */
+    protected function normalizeTaxonDataLight(array $taxonData): array
+    {
+        $commonName = $this->getCommonName($taxonData);
+        // Conservation minimal extraction
+        $conservation = null;
+        if (!empty($taxonData['conservation_status'])) {
+            $cs = $taxonData['conservation_status'];
+            $conservation = [
+                'status' => $cs['status'] ?? null,
+                'status_name' => $cs['status_name'] ?? ($cs['iucn'] ?? null),
+            ];
+        }
+
+        return [
+            'id' => $taxonData['id'] ?? null,
+            'scientific_name' => $taxonData['name'] ?? $taxonData['scientific_name'] ?? null,
+            'common_name' => $commonName,
+            'rank' => $taxonData['rank'] ?? null,
+            'rank_level' => $taxonData['rank_level'] ?? null,
+            'default_photo' => $this->extractPhotoData($taxonData['default_photo'] ?? null),
+            'native' => (bool)($taxonData['native'] ?? false),
+            'endemic' => (bool)($taxonData['endemic'] ?? false),
+            'introduced' => (bool)($taxonData['introduced'] ?? false),
+            'preferred_establishment_means' => $taxonData['preferred_establishment_means'] ?? null,
+            'conservation_status' => $conservation,
+            'wikipedia_url' => $taxonData['wikipedia_url'] ?? null,
+            'iconic_taxon_name' => $taxonData['iconic_taxon_name'] ?? null,
+            // Omit gallery, ancestors, listed_taxa_count, etc. for speed
         ];
     }
     /**
