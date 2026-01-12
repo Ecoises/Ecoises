@@ -42,6 +42,7 @@ class Activity extends Model
     protected $appends = [
         'options',
         'is_true',
+        'correct_answer',
         'true_false_feedback',
         'items',
         'pairs',
@@ -52,7 +53,8 @@ class Activity extends Model
         return $this->morphTo();
     }
 
-    // Accessors to flatten content_data
+    // Accessors mejorados
+
     public function getOptionsAttribute()
     {
         return $this->content_data['options'] ?? null;
@@ -60,7 +62,35 @@ class Activity extends Model
 
     public function getIsTrueAttribute()
     {
-        return $this->content_data['is_true'] ?? null;
+        $value = $this->content_data['is_true'] ?? null;
+        
+        // Convertir string a boolean si es necesario
+        if ($value === 'true') return true;
+        if ($value === 'false') return false;
+        
+        return $value;
+    }
+
+    public function getCorrectAnswerAttribute()
+    {
+        // Para True/False
+        if ($this->activity_type === 'quiz_true_false') {
+            $value = $this->content_data['is_true'] ?? null;
+            
+            // Convertir string a boolean si es necesario (retrocompatibilidad)
+            if ($value === 'true') return true;
+            if ($value === 'false') return false;
+            
+            return $value;
+        }
+        
+        // Para Multiple Choice
+        if ($this->activity_type === 'quiz_multiple') {
+            return $this->content_data['options'] ?? null;
+        }
+        
+        // Para otros tipos
+        return $this->correct_answers;
     }
 
     public function getTrueFalseFeedbackAttribute()

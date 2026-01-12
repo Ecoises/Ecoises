@@ -76,14 +76,15 @@ class ContentProgressService
         // 3. Actualizar o Crear Progreso de Lección
         $progress = UserLessonProgress::firstOrCreate(
             ['user_id' => $user->id, 'lesson_id' => $lesson->id],
-            ['enrollment_id' => $enrollment->id]
+            // Asegurar estado correcto en DB
+            ['enrollment_id' => $enrollment->id, 'status' => 'en_progreso', 'started_at' => now()]
         );
 
-        if ($progress->status !== 'completed') {
+        if ($progress->status !== 'completada') {
             DB::transaction(function () use ($progress, $user, $lesson, $enrollment) {
                 // Marcar como completa
                 $progress->update([
-                    'status' => 'completed',
+                    'status' => 'completada',
                     'completed_at' => Carbon::now(),
                     'points_earned' => $lesson->points, // Snapshot de puntos ganados
                 ]);
@@ -115,7 +116,7 @@ class ContentProgressService
         $totalLessons = $enrollment->content->lessons()->count();
         if ($totalLessons > 0) {
             $completedLessons = UserLessonProgress::where('enrollment_id', $enrollment->id)
-                ->where('status', 'completed')
+                ->where('status', 'completada')
                 ->count();
 
             $percentage = ($completedLessons / $totalLessons) * 100;
@@ -126,7 +127,7 @@ class ContentProgressService
                 $updateData['completed_at'] = Carbon::now();
                 
                 // Bonus por curso completo (si existe)
-                $coursePoints = $enrollment->content->courseDetails->completion_points ?? 0;
+                $coursePoints = optional($enrollment->content->courseDetails)->completion_points ?? 0;
                 if ($coursePoints > 0) {
                      $this->gamificationService->awardPoints(
                         $enrollment->user, 

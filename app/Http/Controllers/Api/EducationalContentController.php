@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\EducationalContent;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class EducationalContentController extends Controller
 {
@@ -56,11 +57,26 @@ class EducationalContentController extends Controller
             ->with(['categories', 'lessons.activities', 'author', 'articleDetails', 'courseDetails'])
             ->firstOrFail();
 
+        // Resolve authenticated user (optional): prefer request()->user(), then fallback to Sanctum token if available
+        $user = request()->user();
+        if (!$user) {
+            try {
+                $bearer = request()->bearerToken();
+                if ($bearer && class_exists(\Laravel\Sanctum\PersonalAccessToken::class) && \Illuminate\Support\Facades\Schema::hasTable('personal_access_tokens')) {
+                    $accessToken = PersonalAccessToken::findToken($bearer);
+                    if ($accessToken && $accessToken->tokenable) {
+                        $user = $accessToken->tokenable;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Optional auth must never break public show; ignore errors
+            }
+        }
+
         // If user is authenticated, attach enrollment and progress
-        if (auth()->check()) {
-            $user = auth()->user();
-            
-            $enrollment = $user->contentEnrollments()
+        if ($user) {
+            // Avoid relying on a missing User::contentEnrollments() relation
+            $enrollment = \App\Models\UserContentEnrollment::where('user_id', $user->id)
                 ->where('content_id', $content->id)
                 ->first();
             
@@ -75,8 +91,9 @@ class EducationalContentController extends Controller
                 $content->lesson_progress = $lessonProgress;
             }
 
-            // Get user's successful activity attempts to mark as completed
-            $activityIds = $content->lessons->pluck('activities')->flatten()->pluck('id');
+            // Get user's successful activity attempts to mark as completed (guard against missing lessons)
+            $lessons = $content->lessons ?? collect();
+            $activityIds = $lessons->pluck('activities')->flatten()->pluck('id');
             $completedActivities = \App\Models\UserActivityAttempt::where('user_id', $user->id)
                 ->whereIn('activity_id', $activityIds)
                 ->where('is_correct', true)
@@ -92,9 +109,9 @@ class EducationalContentController extends Controller
     /**
      * Iniciar el contenido (Inscripción).
      */
-    public function start($slugOrId)
+    public function start(Request $request, $slugOrId)
     {
-        $user = auth()->user();
+        $user = $request->user();
         
         // Try to find by slug first, then by ID
         $content = EducationalContent::where('slug', $slugOrId)

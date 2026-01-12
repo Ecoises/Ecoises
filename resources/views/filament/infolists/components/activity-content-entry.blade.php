@@ -239,28 +239,47 @@
                 <p class="text-sm text-gray-500 italic">Sin pares definidos</p>
             @endif
 
-        @elseif($activityType === 'drag_drop')
-            {{-- Arrastrar y soltar --}}
-            @if(is_array($state))
-                <div class="space-y-2">
-                    @foreach($state as $item)
-                        <div class="flex items-center gap-3 p-3 rounded-lg bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-700 transition-colors">
-                            <div class="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-primary-500 text-white font-bold shadow-sm">
-                                {{ $loop->iteration }}
-                            </div>
-                            <div class="flex-1 text-gray-900 dark:text-gray-100">
-                                {{ is_array($item) ? ($item['text'] ?? $item['label'] ?? 'Sin texto') : $item }}
-                            </div>
-                            <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                            </svg>
-                        </div>
-                    @endforeach
-                </div>
-            @else
-                <p class="text-sm text-gray-500 italic">Sin elementos definidos</p>
-            @endif
+       @elseif($activityType === 'drag_drop')
+    {{-- Arrastrar y soltar --}}
+    @php
+        $items = [];
+        if (is_array($state)) {
+            // Estructura KeyValue: {"items": {"key": "value"}}
+            if (isset($state['items']) && is_array($state['items'])) {
+                $items = $state['items'];
+            }
+            // Fallback: estructura directa
+            elseif (!isset($state['items'])) {
+                $items = $state;
+            }
+        }
+    @endphp
 
+    @if(count($items) > 0)
+        <div class="space-y-2">
+            @foreach($items as $element => $category)
+                <div class="flex items-center gap-3 p-3 rounded-lg bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-700 transition-colors">
+                    <div class="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-primary-500 text-white font-bold shadow-sm">
+                        {{ $loop->iteration }}
+                    </div>
+                    
+                    <div class="flex-1 font-medium text-gray-900 dark:text-gray-100">
+                        {{ $element }}
+                    </div>
+                    
+                    <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                    
+                    <div class="flex-shrink-0 px-3 py-1 rounded-full bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 text-sm font-semibold">
+                        {{ $category }}
+                    </div>
+                </div>
+            @endforeach
+        </div>
+    @else
+        <p class="text-sm text-gray-500 italic">Sin elementos definidos</p>
+    @endif
         @else
             {{-- Formato genérico --}}
             <div class="p-4 rounded-lg bg-gray-50 border border-gray-200 dark:bg-gray-800 dark:border-gray-700">

@@ -567,73 +567,72 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
     // }
 
     public static function getActivitySchema(): array
-    {
-        return [
-            Select::make('activity_type')
-                ->label('Tipo de actividad')
-                ->options([
-                    'quiz_multiple' => 'Selección Múltiple',
-                    'quiz_true_false' => 'Verdadero/Falso',
-                    'drag_drop' => 'Arrastrar y Soltar',
-                    'matching' => 'Emparejar',
-                ])
-                ->live()
-                ->native(false)
-                ->required(),
+{
+    return [
+        Select::make('activity_type')
+            ->label('Tipo de actividad')
+            ->options([
+                'quiz_multiple' => 'Selección Múltiple',
+                'quiz_true_false' => 'Verdadero/Falso',
+                'drag_drop' => 'Arrastrar y Soltar',
+                'matching' => 'Emparejar',
+            ])
+            ->live()
+            ->native(false)
+            ->required(),
 
-            Textarea::make('title')
-                ->label('Pregunta/Enunciado')
-                ->required(),
+        Textarea::make('title')
+            ->label('Pregunta/Enunciado')
+            ->required(),
 
-            Section::make('Diseño de Actividades')
-                ->icon('heroicon-o-squares-plus')
-                ->description('Configura el tipo de evaluación o ejercicio para este contenido')
-                ->collapsible()
-                ->schema([
-                    // Quiz Multiple
-                    Repeater::make('content_data.options')
-                        ->label('Opciones de respuesta')
-                        ->visible(fn (Get $get) => $get('activity_type') === 'quiz_multiple')
-                        ->schema([
-                            TextInput::make('text')->required()
+        Section::make('Diseño de Actividades')
+            ->icon('heroicon-o-squares-plus')
+            ->description('Configura el tipo de evaluación o ejercicio para este contenido')
+            ->collapsible()
+            ->schema([
+                // Quiz Multiple
+                Repeater::make('content_data.options')
+                    ->label('Opciones de respuesta')
+                    ->visible(fn (Get $get) => $get('activity_type') === 'quiz_multiple')
+                    ->schema([
+                        TextInput::make('text')
+                            ->required()
                             ->label('Escribe una opción'),
-                            Toggle::make('is_correct')
+                        Toggle::make('is_correct')
                             ->label('Es la respuesta correcta'),
-                            Textarea::make('feedback')
+                        Textarea::make('feedback')
                             ->label('Explicación')
-                            ->placeholder('Explica brevemente por qué esta opción es (o no) la correcta.')
-                            ,
-                        ])
-                        ->addActionLabel('Añadir otra opción')
-                        ->defaultItems(2)
-                        ->reorderableWithButtons(),
+                            ->placeholder('Explica brevemente por qué esta opción es (o no) la correcta.'),
+                    ])
+                    ->addActionLabel('Añadir otra opción')
+                    ->defaultItems(2)
+                    ->reorderableWithButtons(),
+                
+                // True/False - CORREGIDO
+                Toggle::make('content_data.is_true')
+                    ->label('La afirmación es verdadera')
+                    ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
+                    ->helperText('Activa si la afirmación es verdadera, desactiva si es falsa')
+                    ->inline()
+                    ->default(true),
+                
+                Textarea::make('content_data.true_false_feedback')
+                    ->label('Explicación')
+                    ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
+                    ->rows(3)
+                    ->placeholder('Explica por qué esta afirmación es verdadera o falsa'),
                     
-                    // True/False
-                    Radio::make('content_data.is_true')
-                        ->label('Respuesta correcta')
-                        ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
-                        ->options([
-                            'true' => 'Verdadero',
-                            'false' => 'Falso'
-                        ])
-                        ->inline(),
-                    Textarea::make('content_data.true_false_feedback')
-                        ->label('Explicación')
-                        ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
-                        ->rows(3)
-                        ->placeholder('Explica por qué esta afirmación es verdadera o falsa'),
-                        
-                    // Drag Drop
-                    KeyValue::make('content_data.items')
-                        ->label('Relacionar conceptos')
-                        ->keyLabel('Palabra o frase')
-                        ->valueLabel('Pertenece a...')
-                        ->helperText('Crea una lista de elementos. A la izquierda la palabra clave y a la derecha su grupo o descripción.')
-                        ->visible(fn (Get $get) => $get('activity_type') === 'drag_drop')
-                        ->addActionLabel('Añadir elemento'),
-                        
-                    // Matching
-                    Repeater::make('content_data.pairs')
+                // Drag Drop
+                KeyValue::make('content_data.items')
+                    ->label('Relacionar conceptos')
+                    ->keyLabel('Palabra o frase')
+                    ->valueLabel('Pertenece a...')
+                    ->helperText('Crea una lista de elementos. A la izquierda la palabra clave y a la derecha su grupo o descripción.')
+                    ->visible(fn (Get $get) => $get('activity_type') === 'drag_drop')
+                    ->addActionLabel('Añadir elemento'),
+                    
+                // Matching
+                Repeater::make('content_data.pairs')
                     ->label('Crear parejas')
                     ->helperText('Crea conexiones. Los usuarios deberán unir el lado A con el lado B.')
                     ->visible(fn (Get $get) => $get('activity_type') === 'matching')
@@ -650,7 +649,7 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                     ->columns(2)
                     ->addActionLabel('Añadir nueva pareja')
                     ->reorderableWithButtons()
-                ]),
-        ];
-    }
+            ]),
+    ];
+}
 }
