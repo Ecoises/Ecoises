@@ -20,6 +20,7 @@ use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use DiogoGPinto\AuthUIEnhancer\AuthUIEnhancerPlugin;
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -78,7 +79,13 @@ class AdminPanelProvider extends PanelProvider
                 FilamentInfoWidget::class,
             ])
             ->viteTheme('resources/css/filament/admin/theme.css')
-            ->plugin(FilamentShieldPlugin::make())
+            ->plugins([
+                FilamentShieldPlugin::make(),
+                AuthUIEnhancerPlugin::make()
+                ->showEmptyPanelOnMobile(false)
+                ->emptyPanelBackgroundImageOpacity('80%')
+                ->emptyPanelBackgroundImageUrl(asset('images/login.jpg')),
+            ])
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,

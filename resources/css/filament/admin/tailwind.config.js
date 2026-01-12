@@ -8,5 +8,6 @@ export default {
         './vendor/filament/**/*.blade.php',
         // Esta es la ruta exacta de tu vista personalizada
         './resources/views/filament/infolists/components/activity-content-entry.blade.php',
+        './vendor/diogogpinto/filament-auth-ui-enhancer/**/*.blade.php',
     ],
 }

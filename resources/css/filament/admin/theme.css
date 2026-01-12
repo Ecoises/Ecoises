@@ -4,3 +4,5 @@
 @source '../../../../resources/views/filament/**/*';
 
 @source '../../../../resources/views/filament/infolists/components/**/*.blade.php';
+
+@source '../../../../vendor/diogogpinto/filament-auth-ui-enhancer/resources/**/*.blade.php';
