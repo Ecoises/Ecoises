@@ -1345,10 +1345,38 @@ public function mapEstablishmentMeans(?string $status): array
                 $name = $sp['scientific_name'];
                 if ($localTaxa->has($name)) {
                     $taxon = $localTaxa->get($name);
-                    // Check if complete enough (must have photo)
-                    $enrichedData = $taxon->enriched_data;
-                    if (!empty($enrichedData['default_photo']['url'] ?? null)) {
-                         $finalTaxa[] = $enrichedData;
+                    
+                    // Optimization: If enrichment is NOT requested, manually build light payload
+                    // avoiding the heavy getEnrichedDataAttribute accessor
+                    if (empty($filters['enrich']) || $filters['enrich'] === 'false' || $filters['enrich'] === '0') {
+                        // Check for photo manually from relation (Eager loaded 'apiReferences')
+                        // We need to parse the 'data' JSON column of the pivot/reference
+                        $ref = $taxon->apiReferences->first(); // Already loaded? Yes, with('apiReferences')
+                        $photoUrl = null;
+                        
+                        // Try to get photo from ref data without full enrichment logic
+                        if ($ref && $ref->data && !empty($ref->data['default_photo']['url'])) {
+                            $photoUrl = $ref->data['default_photo']['url'];
+                        } elseif ($taxon->default_photo) { 
+                             // Fallback to model attribute if exists (legacy)
+                             $photoUrl = $taxon->default_photo;
+                        }
+
+                        if ($photoUrl) {
+                             $finalTaxa[] = [
+                                 'id' => $taxon->id,
+                                 'scientific_name' => $taxon->scientific_name,
+                                 'common_name' => $taxon->common_name,
+                                 'default_photo' => ['url' => $photoUrl],
+                                 // Minimal fields for card
+                             ];
+                        }
+                    } else {
+                        // Original Heavy Path
+                        $enrichedData = $taxon->enriched_data;
+                        if (!empty($enrichedData['default_photo']['url'] ?? null)) {
+                             $finalTaxa[] = $enrichedData;
+                        }
                     }
                 } else {
                     $missingInLocal[$name] = $sp; // Queue for iNat check
@@ -1396,7 +1424,17 @@ public function mapEstablishmentMeans(?string $status): array
                                 // Save to DB
                                 $savedTaxon = $this->createOrUpdateTaxonFromApiData($bestMatch);
                                 if ($savedTaxon) {
-                                    $finalTaxa[] = $savedTaxon->enriched_data;
+                                    if (empty($filters['enrich']) || $filters['enrich'] === 'false') {
+                                         // Light payload
+                                         $finalTaxa[] = [
+                                             'id' => $savedTaxon->id,
+                                             'scientific_name' => $savedTaxon->scientific_name,
+                                             'common_name' => $savedTaxon->common_name,
+                                             'default_photo' => ['url' => $bestMatch['default_photo']['url'] ?? null],
+                                         ];
+                                    } else {
+                                        $finalTaxa[] = $savedTaxon->enriched_data;
+                                    }
                                 }
                             } else {
                                 // Cache "No Photo" state for 7 days
