@@ -203,6 +203,12 @@ class TaxonController extends Controller
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
+    /**
+     * Lista especies de Colombia o cercanas para exploración (Optimizado)
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function exploreColombiaSpecies(Request $request)
     {
         $request->validate([
@@ -213,39 +219,43 @@ class TaxonController extends Controller
             'native' => 'sometimes',
             'endemic' => 'sometimes',
             'threatened' => 'sometimes',
-            'enrich' => 'sometimes',
+            'lat' => 'sometimes|numeric',
+            'lng' => 'sometimes|numeric',
+            'radius' => 'sometimes|numeric',
+            'order_by' => 'sometimes|string', // observed_on, random
         ]);
 
         // Obtener parámetros de la solicitud
-        $params = $request->only(['per_page', 'page', 'q', 'rank', 'native', 'endemic', 'threatened', 'enrich']);
+        $params = $request->only([
+            'per_page', 'page', 'q', 'rank', 
+            'native', 'endemic', 'threatened',
+            'lat', 'lng', 'radius', 'order_by'
+        ]);
 
-        // Obtener las especies de Colombia
-        $result = $this->taxonService->getColombiaSpecies($params);
+        // Usar método optimizado iNaturalist-only
+        $result = $this->taxonService->getSpeciesNearLocation($params);
 
         if (!$result['success']) {
             return response()->json([
                 'success' => false,
-                'message' => $result['error']['message'] ?? 'Error al obtener las especies de Colombia',
+                'message' => $result['error']['message'] ?? 'Error al obtener las especies',
                 'code' => $result['error']['code'] ?? 500,
                 'data' => null,
             ], $result['error']['code'] ?? 500);
         }
 
-        // ← Fix: Enriquecer si se pide (manejar array vs collection)
-        $shouldEnrich = $request->boolean('enrich', true);
-        $data = $shouldEnrich ? collect($result['data'])->map(function ($item) {
-             return is_array($item) ? $item : $item->enriched_data;
-        }) : $result['data'];
+        // OPTIMIZACIÓN: Retornamos data "light" sin enriquecimiento pesado
+        $data = $result['data'];
 
         return response()->json([
             'success' => true,
-            'message' => 'Especies de Colombia obtenidas correctamente',
+            'message' => 'Especies obtenidas correctament (iNat Optimized)',
             'data' => $data,
             'meta' => [
                 'source' => $result['source'] ?? 'api',
                 'cached' => $result['cached'] ?? false,
                 'pagination' => $result['pagination'] ?? null,
-                'location' => 'Colombia'
+                'used_location' => $result['used_location'] ?? null,
             ],
         ]);
     }

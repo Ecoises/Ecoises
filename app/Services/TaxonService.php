@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Arr;
 
 class TaxonService
 {
@@ -1237,6 +1238,84 @@ public function mapEstablishmentMeans(?string $status): array
      * @param array $filters
      * @return array
      */
+
+    /**
+     * Obtiene especies cercanas o de Colombia (Solo iNaturalist)
+     * Optimizada para rendimiento y ubicación dinámica.
+     * MIGRACIÓN: Reemplaza a getColombiaSpecies para el explorador principal.
+     */
+    public function getSpeciesNearLocation(array $filters = []): array
+    {
+        // 1. Extraer Params
+        $lat = !empty($filters['lat']) ? (float)$filters['lat'] : null;
+        $lng = !empty($filters['lng']) ? (float)$filters['lng'] : null;
+        $radius = !empty($filters['radius']) ? (float)$filters['radius'] : 50;
+        
+        $perPage = (int)($filters['per_page'] ?? 24);
+        $page = (int)($filters['page'] ?? 1);
+        $orderBy = $filters['order_by'] ?? 'observed_on';
+        $order = $filters['order'] ?? 'desc';
+
+        // 2. Construir params iNat
+        $inatParams = [
+            'per_page' => $perPage,
+            'page' => $page,
+            'verifiable' => 'true',
+            'quality_grade' => 'research',
+            'photos' => 'true',
+            'hrank' => 'species',
+            'lrank' => 'species',
+            // Si es random, pedimos por popularidad base y mezclamos
+            'order_by' => $orderBy === 'random' ? 'observations_count' : $orderBy, 
+            'order' => $order,
+        ];
+        
+        // Filtros adicionales (Booleanos iNat)
+        if (!empty($filters['native']) && $filters['native'] !== 'all') $inatParams['native'] = 'true';
+        if (!empty($filters['endemic']) && $filters['endemic'] !== 'all') $inatParams['endemic'] = 'true';
+        if (!empty($filters['threatened']) && $filters['threatened'] !== 'all') $inatParams['threatened'] = 'true';
+
+        // Lógica de Ubicación
+        if ($lat && $lng) {
+            $inatParams['lat'] = $lat;
+            $inatParams['lng'] = $lng;
+            $inatParams['radius'] = $radius;
+            $inatParams['place_id'] = null; // Desactivar fallback Colombia
+        } else {
+            // Fallback Colombia
+            $inatParams['place_id'] = 7196;
+            $inatParams['preferred_place_id'] = 7196; // Para status
+        }
+
+        // 3. Caché Diferenciado
+        // Clave: lat(4dec)_lng(4dec)_rad_page_md5(filtros)
+        $latKey = $lat ? round($lat, 4) : 'CO';
+        $lngKey = $lng ? round($lng, 4) : 'CO';
+        $radKey = $lat ? $radius : 'def';
+        
+        // Hash de filtros (excepto coords y paginación)
+        $filterStr = http_build_query(Arr::except($inatParams, ['lat', 'lng', 'radius', 'page', 'per_page']));
+        // Usamos md5 para abreviar la clave
+        $cacheKey = "species_expl_v3_{$latKey}_{$lngKey}_{$radKey}_{$page}_{$perPage}_" . md5($filterStr);
+
+        $ttl = ($lat && $lng) ? 600 : 3600; // 10 min local, 60 min global
+
+        return Cache::remember($cacheKey, now()->addSeconds($ttl), function() use ($inatParams, $orderBy) {
+             $result = $this->iNaturalistService->getSpeciesCounts($inatParams);
+             
+             if (!$result['success']) return $result;
+
+             // Post-procesamiento
+             if ($orderBy === 'random' && !empty($result['data'])) {
+                 shuffle($result['data']);
+             }
+             
+             $result['source'] = 'inat_optimized';
+             $result['used_location'] = isset($inatParams['lat']) ? 'coords' : 'place_id';
+             
+             return $result;
+        });
+    }
 
     /**
      * Hybrid Approach: GBIF (List) -> iNaturalist (Enrichment)
