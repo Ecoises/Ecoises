@@ -118,7 +118,47 @@ class INaturalistService extends BaseApiService
             'api' => $this->apiName,
         ];
     }
-    
+    /**
+     * Obtiene múltiples taxones por sus IDs (Bulk)
+     * Utiliza preferred_place_id para obtener establishment status correcto
+     */
+    public function getTaxaByIds(array $ids, array $params = []): array
+    {
+        if (empty($ids)) return ['success' => true, 'data' => []];
+
+        $defaultParams = array_merge($this->getDefaultParams(), [
+            'preferred_place_id' => config('services.inaturalist.preferred_place_id', 7196),
+            'per_page' => count($ids), // Ask for exactly this many
+            'page' => 1,
+            'id' => implode(',', $ids),
+            'locale' => 'es',
+        ], $params);
+
+        $response = $this->makeRequest('get', '/taxa', $defaultParams);
+        
+        if (!$response['success']) return $response;
+        
+        $results = $response['data']['results'] ?? [];
+        $normalized = [];
+        foreach ($results as $result) {
+            // Use normalizeTaxonDataLight because we are merging into a list view
+            // But we need to make sure Light normalizer includes establishment fields (which I fixed earlier)
+            try {
+                // Actually, let's use the FULL normalizer if we want richness? 
+                // No, the user wants badges, but we still need it to match the list format.
+                // The Light normalizer now has the establishment logic I added. 
+                // But wait, the SOURCE data ($result) will now HAVE preferred_establishment_means.
+                // So Light normalizer will pick it up correctly.
+                $normalized[] = $this->normalizeTaxonDataLight($result);
+            } catch (\Exception $e) { }
+        }
+        
+        return [
+            'success' => true,
+            'data' => $normalized,
+        ];
+    }
+
     /**
      * Busca taxones por nombre científico o común
      *
@@ -499,6 +539,11 @@ class INaturalistService extends BaseApiService
             'endemic' => (bool)($taxonData['endemic'] ?? false),
             'introduced' => (bool)($taxonData['introduced'] ?? false),
             'preferred_establishment_means' => $taxonData['preferred_establishment_means'] ?? null,
+            // Calculate establishment_status_colombia for frontend badges
+            'establishment_status_colombia' => ($taxonData['endemic'] ?? false) ? 'endemic' : 
+                                              (($taxonData['native'] ?? false) ? 'native' : 
+                                              (($taxonData['introduced'] ?? false) ? 'introduced' : 
+                                              ($taxonData['preferred_establishment_means'] ?? null))),
             'conservation_status' => $conservation,
             'wikipedia_url' => $taxonData['wikipedia_url'] ?? null,
             'iconic_taxon_name' => $taxonData['iconic_taxon_name'] ?? null,

@@ -1253,7 +1253,10 @@ public function mapEstablishmentMeans(?string $status): array
         
         $perPage = (int)($filters['per_page'] ?? 24);
         $page = (int)($filters['page'] ?? 1);
-        $orderBy = $filters['order_by'] ?? 'observed_on';
+        $orderBy = $filters['order_by'] ?? 'observations_count';
+        // Force observation_count if sorting by observed_on/random for species_counts endpoint limitation
+        // (Random is handled manually post-fetch)
+        $apiOrder = ($orderBy === 'random' || $orderBy === 'observed_on') ? 'observations_count' : $orderBy;
         $order = $filters['order'] ?? 'desc';
 
         // 2. Construir params iNat
@@ -1265,15 +1268,19 @@ public function mapEstablishmentMeans(?string $status): array
             'photos' => 'true',
             'hrank' => 'species',
             'lrank' => 'species',
-            // Si es random, pedimos por popularidad base y mezclamos
-            'order_by' => $orderBy === 'random' ? 'observations_count' : $orderBy, 
+            'order_by' => $apiOrder, 
             'order' => $order,
         ];
         
-        // Filtros adicionales (Booleanos iNat)
+        // Filtros adicionales
         if (!empty($filters['native']) && $filters['native'] !== 'all') $inatParams['native'] = 'true';
         if (!empty($filters['endemic']) && $filters['endemic'] !== 'all') $inatParams['endemic'] = 'true';
         if (!empty($filters['threatened']) && $filters['threatened'] !== 'all') $inatParams['threatened'] = 'true';
+        
+        // Mapeo de iconic_taxa
+        if (!empty($filters['iconic_taxa']) && $filters['iconic_taxa'] !== 'Todas') {
+             $inatParams['iconic_taxa'] = $filters['iconic_taxa'];
+        }
 
         // Lógica de Ubicación
         if ($lat && $lng) {
@@ -1288,33 +1295,60 @@ public function mapEstablishmentMeans(?string $status): array
         }
 
         // 3. Caché Diferenciado
-        // Clave: lat(4dec)_lng(4dec)_rad_page_md5(filtros)
         $latKey = $lat ? round($lat, 4) : 'CO';
         $lngKey = $lng ? round($lng, 4) : 'CO';
         $radKey = $lat ? $radius : 'def';
         
-        // Hash de filtros (excepto coords y paginación)
+        // Hash de filtros
         $filterStr = http_build_query(Arr::except($inatParams, ['lat', 'lng', 'radius', 'page', 'per_page']));
-        // Usamos md5 para abreviar la clave
-        $cacheKey = "species_expl_v3_{$latKey}_{$lngKey}_{$radKey}_{$page}_{$perPage}_" . md5($filterStr);
+        $cacheKey = "species_expl_v4_{$latKey}_{$lngKey}_{$radKey}_{$page}_{$perPage}_" . md5($filterStr);
 
-        $ttl = ($lat && $lng) ? 600 : 3600; // 10 min local, 60 min global
+        $ttl = ($lat && $lng) ? 600 : 3600;
 
-        return Cache::remember($cacheKey, now()->addSeconds($ttl), function() use ($inatParams, $orderBy) {
+        $result = Cache::remember($cacheKey, now()->addSeconds($ttl), function() use ($inatParams) {
+             // A. Obtener lista básica (counts)
              $result = $this->iNaturalistService->getSpeciesCounts($inatParams);
              
-             if (!$result['success']) return $result;
+             if (!$result['success'] || empty($result['data'])) return $result;
 
-             // Post-procesamiento
-             if ($orderBy === 'random' && !empty($result['data'])) {
-                 shuffle($result['data']);
+             // B. ENRIQUECIMIENTO (Batch /taxa)
+             // Esto soluciona la falta de establishment_means/badges
+             $items = collect($result['data']);
+             $ids = $items->pluck('id')->toArray();
+             
+             if (!empty($ids)) {
+                 $enrichedResponse = $this->iNaturalistService->getTaxaByIds($ids);
+                 
+                 if ($enrichedResponse['success']) {
+                     $enrichedMap = collect($enrichedResponse['data'])->keyBy('id');
+                     
+                     // Fusionar datos enriquecidos sobre los originales
+                     $result['data'] = $items->map(function($item) use ($enrichedMap) {
+                         if ($rich = $enrichedMap->get($item['id'])) {
+                             // Sobrescribir campos clave que falten en species_counts
+                             $item['establishment_status_colombia'] = $rich['establishment_status_colombia'] ?? $item['establishment_status_colombia'];
+                             $item['native'] = $rich['native'];
+                             $item['endemic'] = $rich['endemic'];
+                             $item['introduced'] = $rich['introduced'];
+                             $item['conservation_status'] = $rich['conservation_status'] ?? $item['conservation_status'];
+                         }
+                         return $item;
+                     })->toArray();
+                 }
              }
              
-             $result['source'] = 'inat_optimized';
+             $result['source'] = 'inat_optimized_enriched';
              $result['used_location'] = isset($inatParams['lat']) ? 'coords' : 'place_id';
              
              return $result;
         });
+
+        // 4. Post-procesamiento NO CACHEADO (Random Sort)
+        if ($orderBy === 'random' && !empty($result['data'])) {
+             shuffle($result['data']);
+        }
+        
+        return $result;
     }
 
     /**
