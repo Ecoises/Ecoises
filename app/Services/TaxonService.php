@@ -1251,6 +1251,8 @@ public function mapEstablishmentMeans(?string $status): array
         $lng = !empty($filters['lng']) ? (float)$filters['lng'] : null;
         $radius = !empty($filters['radius']) ? (float)$filters['radius'] : 50;
         
+        Log::info('🔍 Filtros recibidos en getSpeciesNearLocation', $filters); // Debugging Log
+
         $perPage = (int)($filters['per_page'] ?? 24);
         $page = (int)($filters['page'] ?? 1);
         $orderBy = $filters['order_by'] ?? 'observations_count';
@@ -1277,9 +1279,17 @@ public function mapEstablishmentMeans(?string $status): array
         if (!empty($filters['endemic']) && $filters['endemic'] !== 'all') $inatParams['endemic'] = 'true';
         if (!empty($filters['threatened']) && $filters['threatened'] !== 'all') $inatParams['threatened'] = 'true';
         
-        // Mapeo de iconic_taxa
-        if (!empty($filters['iconic_taxa']) && $filters['iconic_taxa'] !== 'Todas') {
-             $inatParams['iconic_taxa'] = $filters['iconic_taxa'];
+        // Mapeo de iconic_taxa (Prioritario - más flexible que taxon_id)
+        if (!empty($filters['iconic_taxa'])) {
+            // Aceptar tanto string como array
+            $iconic = is_array($filters['iconic_taxa']) ? $filters['iconic_taxa'] : [$filters['iconic_taxa']];
+            // iNaturalist acepta iconic_taxa[] como parámetro repetible
+            $inatParams['iconic_taxa'] = $iconic;
+        }
+        
+        // Soporte legacy para taxon_id (si se envía, se usa también)
+        if (!empty($filters['taxon_id'])) {
+             $inatParams['taxon_id'] = $filters['taxon_id'];
         }
 
         // Lógica de Ubicación
