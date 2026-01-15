@@ -1244,14 +1244,16 @@ public function mapEstablishmentMeans(?string $status): array
      * Optimizada para rendimiento y ubicación dinámica.
      * MIGRACIÓN: Reemplaza a getColombiaSpecies para el explorador principal.
      */
-    public function getSpeciesNearLocation(array $filters = []): array
-    {
-        // 1. Extraer Params
-        $lat = !empty($filters['lat']) ? (float)$filters['lat'] : null;
-        $lng = !empty($filters['lng']) ? (float)$filters['lng'] : null;
-        $radius = !empty($filters['radius']) ? (float)$filters['radius'] : 50;
-        
-        Log::info('🔍 Filtros recibidos en getSpeciesNearLocation', $filters); // Debugging Log
+     public function getSpeciesNearLocation(array $filters = []): array
+     {
+         Log::info('🔍 Params received in getSpeciesNearLocation', $filters); // Debug log
+
+         // 1. Extraer Params
+         $lat = !empty($filters['lat']) ? (float)$filters['lat'] : null;
+         $lng = !empty($filters['lng']) ? (float)$filters['lng'] : null;
+         $radius = !empty($filters['radius']) ? (float)$filters['radius'] : 50;
+
+         Log::info('🔍 Filtros recibidos en getSpeciesNearLocation', $filters); // Debugging Log
 
         $perPage = (int)($filters['per_page'] ?? 24);
         $page = (int)($filters['page'] ?? 1);
@@ -1279,15 +1281,19 @@ public function mapEstablishmentMeans(?string $status): array
         if (!empty($filters['endemic']) && $filters['endemic'] !== 'all') $inatParams['endemic'] = 'true';
         if (!empty($filters['threatened']) && $filters['threatened'] !== 'all') $inatParams['threatened'] = 'true';
         
-        // Mapeo de iconic_taxa (Prioritario - más flexible que taxon_id)
+        
+        // Soporte para filtro por grupo icónico
+        // El endpoint /observations/species_counts SÍ acepta iconic_taxa[]
         if (!empty($filters['iconic_taxa'])) {
-            // Aceptar tanto string como array
-            $iconic = is_array($filters['iconic_taxa']) ? $filters['iconic_taxa'] : [$filters['iconic_taxa']];
-            // iNaturalist acepta iconic_taxa[] como parámetro repetible
+            $iconic = is_array($filters['iconic_taxa'])
+                ? $filters['iconic_taxa']
+                : explode(',', $filters['iconic_taxa']);
+
             $inatParams['iconic_taxa'] = $iconic;
+            Log::info('Aplicando filtro iconic_taxa', ['valores' => $iconic]);
         }
         
-        // Soporte legacy para taxon_id (si se envía, se usa también)
+        // Soporte directo para taxon_id (sobrescribe iconic_taxa si ambos están presentes)
         if (!empty($filters['taxon_id'])) {
              $inatParams['taxon_id'] = $filters['taxon_id'];
         }
@@ -1303,6 +1309,13 @@ public function mapEstablishmentMeans(?string $status): array
             $inatParams['place_id'] = 7196;
             $inatParams['preferred_place_id'] = 7196; // Para status
         }
+        
+        // Log final params antes de llamar API
+        Log::info('📤 Parámetros finales para iNaturalist API', [
+            'inatParams' => $inatParams,
+            'has_taxon_id' => isset($inatParams['taxon_id']),
+            'taxon_id_value' => $inatParams['taxon_id'] ?? 'N/A'
+        ]);
 
         // 3. Caché Diferenciado
         $latKey = $lat ? round($lat, 4) : 'CO';

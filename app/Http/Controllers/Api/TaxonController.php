@@ -219,6 +219,7 @@ class TaxonController extends Controller
             'native' => 'sometimes',
             'endemic' => 'sometimes',
             'threatened' => 'sometimes',
+            'iconic_taxa' => 'sometimes|string',
             'lat' => 'sometimes|numeric',
             'lng' => 'sometimes|numeric',
             'radius' => 'sometimes|numeric',
@@ -227,8 +228,8 @@ class TaxonController extends Controller
 
         // Obtener parámetros de la solicitud
         $params = $request->only([
-            'per_page', 'page', 'q', 'rank', 
-            'native', 'endemic', 'threatened',
+            'per_page', 'page', 'q', 'rank',
+            'native', 'endemic', 'threatened', 'iconic_taxa',
             'lat', 'lng', 'radius', 'order_by'
         ]);
 
