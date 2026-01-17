@@ -41,6 +41,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/activities/{id}/attempt', [\App\Http\Controllers\Api\ActivityController::class, 'attempt']);
 });
 
+// Ruta para Especies Diarias con IA
+use App\Http\Controllers\Api\DailySpeciesController;
+Route::get('/daily-curiosities', [DailySpeciesController::class, 'index']);
+
 
 
 
