@@ -98,6 +98,49 @@ class ActivityController extends Controller
                 'completed_at' => now(),
             ]);
 
+            // UPDATE PROGRESS STATISTICS
+            if ($lessonProgressId) {
+                $lessonProgress = \App\Models\UserLessonProgress::find($lessonProgressId);
+                
+                if ($lessonProgress && $lessonProgress->lesson) {
+                    $lesson = $lessonProgress->lesson;
+                    $lessonActivities = $lesson->activities;
+                    
+                    // 1. Calculate Lesson Stats
+                    $totalActivities = $lessonActivities->count();
+                    $pointsPossible = $lessonActivities->sum('max_points'); // Assuming max_points column on activities
+
+                    // Get unique completed activities for this user and lesson
+                    // Note: We use the just created attempt + historical data
+                    $completedActivityIds = UserActivityAttempt::where('user_id', $user->id)
+                        ->where('lesson_progress_id', $lessonProgressId) // Filter by progress to be safe, or by lesson activities
+                        ->where('is_correct', true)
+                        ->pluck('activity_id')
+                        ->unique();
+                    
+                    $activitiesCompleted = $completedActivityIds->count();
+                    
+                    // Calculate actual points earned from completed activities (sum or their max_points)
+                    $pointsEarned = $lessonActivities->whereIn('id', $completedActivityIds)->sum('max_points');
+
+                    $lessonProgress->update([
+                        'last_accessed_at' => now(),
+                        'total_activities' => $totalActivities,
+                        'activities_completed' => $activitiesCompleted,
+                        'points_earned' => $pointsEarned,
+                        'points_possible' => $pointsPossible,
+                    ]);
+
+                    // 2. Update Enrollment Stats
+                    if ($lessonProgress->enrollment) {
+                        $lessonProgress->enrollment->update([
+                            'last_accessed_at' => now(),
+                            'current_lesson_id' => $lesson->id,
+                        ]);
+                    }
+                }
+            }
+
             return response()->json([
                 'attempt' => $attempt,
                 'already_completed' => $alreadyCompleted,

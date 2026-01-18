@@ -11,20 +11,27 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('user_activity_attempts', function (Blueprint $table) {
-            // Intentar eliminar la clave foránea anterior si existe.
-            // Usamos un bloque try/catch implícito al verificar si existe el índice (Laravel a veces maneja esto, pero seremos explícitos con la sintaxis de array que busca el nombre convencional)
-            
-            try {
+        // Intentar eliminar la clave foránea anterior si existe.
+        try {
+            Schema::table('user_activity_attempts', function (Blueprint $table) {
                 $table->dropForeign(['activity_id']);
-            } catch (\Exception $e) {
-                // Si no existe la foránea, continuamos.
+            });
+        } catch (\Exception $e) {
+            // Si no existe la foránea, continuamos.
+        }
+
+        Schema::table('user_activity_attempts', function (Blueprint $table) {
+            // Asegurarnos que la columna existe
+            if (!Schema::hasColumn('user_activity_attempts', 'activity_id')) {
+                 $table->foreignId('activity_id')->after('user_id'); // Crear columna
+                 // Nota: foreignId crea unsignedBigInteger
             }
 
-            // Asegurarnos que la columna use el tipo correcto (unsignedBigInteger) si no lo era
-            // $table->unsignedBigInteger('activity_id')->change(); 
-
             // Agregar la nueva relación correcta hacia 'activities'
+            // Verificar primero si no existe ya la foreign key para evitar duplicados si corremos esto varias veces?
+            // Laravel migration suele fallar si FK ya existe con el mismo nombre.
+            // Pero acabamos de intentar hacer drop.
+            
             $table->foreign('activity_id')
                   ->references('id')
                   ->on('activities')

@@ -44,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
 // Ruta para Especies Diarias con IA
 use App\Http\Controllers\Api\DailySpeciesController;
 Route::get('/daily-curiosities', [DailySpeciesController::class, 'index']);
+Route::get('/daily-recommendation', [DailySpeciesController::class, 'speciesOfTheDay']);
 
 
 

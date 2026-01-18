@@ -15,19 +15,24 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('lesson_id')->constrained('lessons')->onDelete('cascade');
-            $table->foreignId('enrollment_id')->constrained('user_course_enrollments')->onDelete('cascade');
-            $table->enum('status', ['no_iniciada', 'en_progreso', 'completada', 'bloqueada'])->default('no_iniciada');
+            // enrollment_id will be handled/linked properly in later migrations (Refactor)
+            // We define it as nullable bigInt for now so data isn't lost if filled, 
+            // but without constraint until the target table exists.
+            $table->unsignedBigInteger('enrollment_id')->nullable();
+            
+            $table->string('status')->default('no_iniciada'); // pending/en_progreso/completada
             $table->timestamp('started_at')->nullable();
             $table->timestamp('completed_at')->nullable();
             $table->timestamp('last_accessed_at')->nullable();
+            
+            // Adding stats columns we recently discussed, initializing them here
             $table->integer('activities_completed')->default(0);
             $table->integer('total_activities')->default(0);
             $table->integer('points_earned')->default(0);
             $table->integer('points_possible')->default(0);
             $table->integer('time_spent')->default(0);
+
             $table->timestamps();
-            
-            $table->unique(['user_id', 'lesson_id']);
         });
     }
 

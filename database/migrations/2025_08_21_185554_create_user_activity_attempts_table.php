@@ -14,7 +14,6 @@ return new class extends Migration
         Schema::create('user_activity_attempts', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
-            $table->foreignId('activity_id')->constrained('lesson_activities')->onDelete('cascade');
             $table->foreignId('lesson_progress_id')->constrained('user_lesson_progress')->onDelete('cascade');
             $table->integer('attempt_number');
             $table->timestamp('started_at')->useCurrent();

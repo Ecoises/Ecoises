@@ -134,10 +134,7 @@ return new class extends Migration
             $table->integer('time_limit')->nullable();
             $table->integer('attempts_allowed')->default(3);
             
-            $table->text('success_message')->nullable();
-            $table->text('failure_message')->nullable();
-            $table->text('explanation')->nullable();
-            
+          
             $table->boolean('is_mandatory')->default(1);
             
             $table->timestamps();
@@ -217,12 +214,17 @@ return new class extends Migration
         });
 
         // 8. Update user_lesson_progress Schema
+        // Try to drop FK if it exists, ignoring errors if it doesn't
+        try {
+            Schema::table('user_lesson_progress', function (Blueprint $table) {
+                $table->dropForeign(['enrollment_id']);
+            });
+        } catch (\Exception $e) {
+            // Continue if FK doesn't exist
+        }
+
         Schema::table('user_lesson_progress', function (Blueprint $table) {
              if (Schema::hasColumn('user_lesson_progress', 'enrollment_id')) {
-                 try {
-                    $table->dropForeign(['enrollment_id']);
-                 } catch (\Exception $e) {}
-                 
                  $table->foreign('enrollment_id')->references('id')->on('user_content_enrollments')->onDelete('cascade');
              }
         });

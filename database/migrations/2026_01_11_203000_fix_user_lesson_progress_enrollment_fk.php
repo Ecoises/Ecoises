@@ -11,20 +11,25 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('user_lesson_progress', function (Blueprint $table) {
-            // Intentar eliminar la clave foránea anterior incorrecta
-            // El nombre por convención sería user_lesson_progress_enrollment_id_foreign
-            try {
-                $table->dropForeign(['enrollment_id']);
-            } catch (\Exception $e) {
-                // Si falla (no existe), ignorar
-            }
+        // Intentar eliminar la clave foránea anterior incorrecta
+        try {
+            Schema::table('user_lesson_progress', function (Blueprint $table) {
+                 $table->dropForeign(['enrollment_id']);
+            });
+        } catch (\Exception $e) {
+            // Si falla (no existe), ignorar
+        }
 
+        Schema::table('user_lesson_progress', function (Blueprint $table) {
             // Agregar la nueva relación correcta hacia 'user_content_enrollments'
-            $table->foreign('enrollment_id')
-                  ->references('id')
-                  ->on('user_content_enrollments')
-                  ->onDelete('cascade');
+            // Verificar si la FK ya existe es complejo, pero dropForeign arriba intentó limpiarla.
+            // Si la columna existe, agregamos la FK.
+             if (Schema::hasColumn('user_lesson_progress', 'enrollment_id')) {
+                $table->foreign('enrollment_id')
+                      ->references('id')
+                      ->on('user_content_enrollments')
+                      ->onDelete('cascade');
+             }
         });
     }
 

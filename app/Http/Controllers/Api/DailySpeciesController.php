@@ -77,6 +77,46 @@ class DailySpeciesController extends Controller
         return $selectedSpecies;
     }
 
+    public function speciesOfTheDay()
+    {
+        $date = now()->format('Y-m-d');
+        $cacheKey = "daily_recommendation_{$date}";
+
+        $species = Cache::remember($cacheKey, 60 * 60 * 24, function () {
+            // Get random taxon with good photo
+            $taxon = Taxa::whereHas('apiReferences') // Ensure it has some external data
+                ->inRandomOrder()
+                ->limit(20) // Get a pool to check for good photos
+                ->get()
+                ->filter(function ($t) {
+                    return !empty($t->enriched_data['default_photo']['medium_url']);
+                })
+                ->first();
+
+            if (!$taxon) {
+                // Fallback to a fixed ID or first available if random failed (unlikely)
+                $taxon = Taxa::first();
+            }
+
+            $enriched = $taxon->enriched_data;
+            
+            return [
+                'id' => $taxon->id,
+                'name' => $taxon->common_name ?? $taxon->scientific_name,
+                'scientificName' => $taxon->scientific_name,
+                'image' => $enriched['default_photo']['medium_url'] 
+                         ?? $enriched['default_photo']['url'] 
+                         ?? "https://images.unsplash.com/photo-1518531933037-9a8473035e52?auto=format&fit=crop&w=800&h=500",
+                'description' => $enriched['wikipedia_summary'] 
+                               ?? "Descubre la biodiversidad de Colombia con el {$taxon->common_name}.",
+                'date' => now()->format('Y-m-d'),
+                'author' => $enriched['default_photo']['attribution'] ?? 'Desconocido',
+            ];
+        });
+
+        return response()->json($species);
+    }
+
     private function generateFunFact($scientificName, $commonName, $apiKey)
     {
         if (!$apiKey) {

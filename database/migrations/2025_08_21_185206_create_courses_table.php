@@ -15,14 +15,13 @@ return new class extends Migration
             $table->id();
             $table->string('title');
             $table->text('description')->nullable();
+            $table->string('type')->default('modular');
             $table->text('thumbnail_url')->nullable();
             $table->enum('difficulty_level', ['principiante', 'intermedio', 'avanzado'])->default('principiante');
             $table->string('category')->nullable();
             $table->integer('estimated_duration')->nullable();
             $table->integer('completion_points')->default(100);
             $table->foreignId('achievement_id')->nullable()->constrained('achievements')->onDelete('set null');
-            $table->json('related_taxa')->nullable();
-            $table->json('target_location_ids')->nullable();
             $table->foreignId('author_id')->nullable()->constrained('users')->onDelete('set null');
             $table->boolean('is_published')->default(false);
             $table->integer('enrollment_count')->default(0);
