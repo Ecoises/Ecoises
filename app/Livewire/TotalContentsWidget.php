@@ -13,9 +13,21 @@ class TotalContentsWidget extends StatsOverviewWidget
     
     protected function getStats(): array
     {
-        $total = EducationalContent::count() ?? 0;
+        $query = EducationalContent::query();
+
+        if (auth()->user()->hasRole('educador')) {
+            $query->where('author_id', auth()->id());
+        }
+
+        $total = $query->count() ?? 0;
     
-        $ultimoMes = EducationalContent::where('created_at', '>=', Carbon::now()->subMonth())->count();
+        $queryMes = EducationalContent::where('created_at', '>=', Carbon::now()->subMonth());
+
+        if (auth()->user()->hasRole('educador')) {
+            $queryMes->where('author_id', auth()->id());
+        }
+
+        $ultimoMes = $queryMes->count();
         
         return [
             Stat::make('Total de Contenidos', $total)

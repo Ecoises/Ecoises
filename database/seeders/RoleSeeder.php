@@ -13,86 +13,83 @@ class RoleSeeder extends Seeder
      */
     public function run(): void
     {
+        // Limpiar cache de permisos
+        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+
+        // Crear rol de Super Admin
+        $superAdmin = Role::firstOrCreate(['name' => config('filament-shield.super_admin.name', 'super_admin')]);
+
+        // Definir todos los permisos necesarios (Formato Shield: PascalCase)
+        $permissions = [
+            // Contenido Educativo
+            'ViewAny:EducationalContent',
+            'View:EducationalContent',
+            'Create:EducationalContent',
+            'Update:EducationalContent',
+            'Delete:EducationalContent',
+            
+            // Categorías
+            'ViewAny:ContentCategory',
+            'View:ContentCategory',
+            'Create:ContentCategory',
+            'Update:ContentCategory',
+            'Delete:ContentCategory',
+
+            // Widgets
+            'View:PublishedContentsWidget',
+            'View:TotalContentsWidget',
+            'View:TotalViewsWidget',
+        ];
+        
+        // Crear permisos si no existen
+        foreach ($permissions as $permission) {
+            Permission::firstOrCreate(['name' => $permission]);
+        }
+
         // Crear rol de Educador
         $educador = Role::firstOrCreate(['name' => 'educador']);
         
         // Crear rol de Editor
         $editor = Role::firstOrCreate(['name' => 'editor']);
         
-        // Crear permisos básicos para recursos educativos
-        $permissions = [
-            // Permisos para Cursos
-            'view:Course',
-            'create:Course',
-            'update:Course',
-            'delete:Course',
-            
-            // Permisos para Lecciones
-            'view:Lesson',
-            'create:Lesson',
-            'update:Lesson',
-            'delete:Lesson',
-            
-            // Permisos para Recursos Educativos
-            'view:EducationalResource',
-            'create:EducationalResource',
-            'update:EducationalResource',
-            'delete:EducationalResource',
-            
-            // Permisos para Observaciones
-            'view:Observation',
-            'update:Observation',
-            'delete:Observation',
-            
-            // Permisos para Comentarios
-            'view:Comment',
-            'update:Comment',
-            'delete:Comment',
-            
-            // Permisos para Usuarios (solo visualización)
-            'view:User',
-        ];
-        
-        // Crear todos los permisos
-        foreach ($permissions as $permission) {
-            Permission::firstOrCreate(['name' => $permission]);
-        }
-        
         // Asignar permisos al rol Educador
         $educador->syncPermissions([
-            'view:Course',
-            'create:Course',
-            'update:Course',
-            'view:Lesson',
-            'create:Lesson',
-            'update:Lesson',
-            'view:EducationalResource',
-            'create:EducationalResource',
-            'update:EducationalResource',
-            'view:User',
+            // Contenido Educativo
+            'ViewAny:EducationalContent',
+            'View:EducationalContent',
+            'Create:EducationalContent',
+            'Update:EducationalContent',
+            'Delete:EducationalContent',
+            
+            // Categorías (Solo crear para el modal inline)
+            'Create:ContentCategory',
+            
+            // Widgets
+            'View:PublishedContentsWidget',
+            'View:TotalContentsWidget',
+            'View:TotalViewsWidget',
         ]);
         
-        // Asignar permisos al rol Editor (más permisos que educador)
+        // Asignar permisos al rol Editor
         $editor->syncPermissions([
-            'view:Course',
-            'create:Course',
-            'update:Course',
-            'delete:Course',
-            'view:Lesson',
-            'create:Lesson',
-            'update:Lesson',
-            'delete:Lesson',
-            'view:EducationalResource',
-            'create:EducationalResource',
-            'update:EducationalResource',
-            'delete:EducationalResource',
-            'view:Observation',
-            'update:Observation',
-            'delete:Observation',
-            'view:Comment',
-            'update:Comment',
-            'delete:Comment',
-            'view:User',
+            // Contenido Educativo
+            'ViewAny:EducationalContent',
+            'View:EducationalContent',
+            'Create:EducationalContent',
+            'Update:EducationalContent',
+            'Delete:EducationalContent',
+            
+            // Categorías (Acceso total)
+            'ViewAny:ContentCategory',
+            'View:ContentCategory',
+            'Create:ContentCategory',
+            'Update:ContentCategory',
+            'Delete:ContentCategory',
+
+            // Widgets
+            'View:PublishedContentsWidget',
+            'View:TotalContentsWidget',
+            'View:TotalViewsWidget',
         ]);
         
         $this->command->info('Roles y permisos creados exitosamente:');

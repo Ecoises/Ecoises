@@ -13,6 +13,7 @@ class Lesson extends Model
 
     protected $fillable = [
         'content_id', // Renamed from course_id
+        'slug',
         'title',
         'description',
         'lesson_order',

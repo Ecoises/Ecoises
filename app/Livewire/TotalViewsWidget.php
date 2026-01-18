@@ -12,7 +12,13 @@ class TotalViewsWidget extends StatsOverviewWidget
     
     protected function getStats(): array
     {
-        $totalViews = EducationalContent::sum('view_count') ?? 0;
+        $query = EducationalContent::query();
+
+        if (auth()->user()->hasRole('educador')) {
+            $query->where('author_id', auth()->id());
+        }
+
+        $totalViews = $query->sum('view_count') ?? 0;
 
         return [
             Stat::make('Vistas Totales', number_format($totalViews))

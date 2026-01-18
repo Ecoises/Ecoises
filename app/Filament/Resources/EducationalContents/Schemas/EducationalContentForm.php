@@ -109,7 +109,17 @@ class EducationalContentForm
                                         ->label('Área temática')
                                         ->multiple()
                                         ->preload()
-                                        ->searchable(),
+                                        ->searchable()
+                                        ->createOptionForm([
+                                            TextInput::make('name')
+                                                ->label('Nombre de Categoría')
+                                                ->required()
+                                                ->live(onBlur: true)
+                                                ->afterStateUpdated(fn (Set $set, $state) => $set('slug', Str::slug($state))),
+                                            TextInput::make('slug')
+                                                ->required()
+                                                ->readOnly(),
+                                        ]),
 
                                     TagsInput::make('tags')
                                         ->label('Etiquetas')
@@ -155,8 +165,13 @@ class EducationalContentForm
                                 ->defaultItems(1)
                                 ->schema([
                                     TextInput::make('title')
-                                    ->label('Título de la lección')
-                                    ->required(),
+                                        ->label('Título de la lección')
+                                        ->required()
+                                        ->live(onBlur: true)
+                                        ->afterStateUpdated(fn (Set $set, $state) => $set('slug', Str::slug($state))),
+
+                                    Hidden::make('slug'),
+
                                     RichEditor::make('content_text')
                                     ->label('Contenido de la Lección')
                                     ->required()
@@ -351,220 +366,220 @@ class EducationalContentForm
 
 // Reemplaza tu método getAudioSectionSchema con este:
 
-public static function getAudioSectionSchema(string $prefix = ''): Section
-{
-    $dot = filled($prefix) ? '.' : '';
+// public static function getAudioSectionSchema(string $prefix = ''): Section
+// {
+//     $dot = filled($prefix) ? '.' : '';
 
-    return Section::make('Audio Narrado')
-        ->description('Genera una versión en audio profesional de tu contenido.')
-        ->icon('heroicon-o-speaker-wave')
-        ->collapsed()
-        ->schema([
-            ToggleButtons::make("{$prefix}{$dot}voice_id")
-                ->label('Selecciona una voz')
-                ->options([
-                    'Charon' => 'Mauricio',
-                    'Aoede' => 'Luisa',
-                    'Puck' => 'Faraón'
-                ])
-                ->default('Charon')
-                ->inline()
-                ->live(),
+//     return Section::make('Audio Narrado')
+//         ->description('Genera una versión en audio profesional de tu contenido.')
+//         ->icon('heroicon-o-speaker-wave')
+//         ->collapsed()
+//         ->schema([
+//             ToggleButtons::make("{$prefix}{$dot}voice_id")
+//                 ->label('Selecciona una voz')
+//                 ->options([
+//                     'Charon' => 'Mauricio',
+//                     'Aoede' => 'Luisa',
+//                     'Puck' => 'Faraón'
+//                 ])
+//                 ->default('Charon')
+//                 ->inline()
+//                 ->live(),
             
-            Hidden::make("{$prefix}{$dot}audio_url")->live(),
-            Hidden::make("{$prefix}{$dot}audio_timestamps"),
-        ])
-        ->footerActions([
-            MediaAction::make('listen')
-                ->label('Escuchar')
-                ->icon('heroicon-o-play')
-                ->color('secondary')
-                ->visible(fn(Get $get) => filled($get("{$prefix}{$dot}audio_url")))
-                ->media(fn(Get $get) => $get("{$prefix}{$dot}audio_url"))
-                ->mediaType(MediaAction::TYPE_AUDIO),
+//             Hidden::make("{$prefix}{$dot}audio_url")->live(),
+//             Hidden::make("{$prefix}{$dot}audio_timestamps"),
+//         ])
+//         ->footerActions([
+//             MediaAction::make('listen')
+//                 ->label('Escuchar')
+//                 ->icon('heroicon-o-play')
+//                 ->color('secondary')
+//                 ->visible(fn(Get $get) => filled($get("{$prefix}{$dot}audio_url")))
+//                 ->media(fn(Get $get) => $get("{$prefix}{$dot}audio_url"))
+//                 ->mediaType(MediaAction::TYPE_AUDIO),
 
-            Action::make('generate')
-                ->label('Generar audio')
-                ->icon('heroicon-m-speaker-wave')
-                ->color('primary')
-                ->modalHeading('Generar audio narrado')
-                ->modalDescription('Se generará la narración en segundo plano. Debes guardar el contenido antes de generar audio. ¿Continuar?')
-                ->modalSubmitActionLabel('Generar')
-                ->requiresConfirmation()
-                ->action(function (Get $get, $record) use ($prefix, $dot) {
-                    $text = strip_tags($get(filled($prefix) ? "{$prefix}.content_text" : "content_text") ?? '');
+//             Action::make('generate')
+//                 ->label('Generar audio')
+//                 ->icon('heroicon-m-speaker-wave')
+//                 ->color('primary')
+//                 ->modalHeading('Generar audio narrado')
+//                 ->modalDescription('Se generará la narración en segundo plano. Debes guardar el contenido antes de generar audio. ¿Continuar?')
+//                 ->modalSubmitActionLabel('Generar')
+//                 ->requiresConfirmation()
+//                 ->action(function (Get $get, $record) use ($prefix, $dot) {
+//                     $text = strip_tags($get(filled($prefix) ? "{$prefix}.content_text" : "content_text") ?? '');
                     
-                    if (blank($text)) {
-                        Notification::make()
-                            ->title('No hay contenido')
-                            ->body('Escribe el contenido antes de generar audio.')
-                            ->warning()
-                            ->send();
-                        return;
-                    }
+//                     if (blank($text)) {
+//                         Notification::make()
+//                             ->title('No hay contenido')
+//                             ->body('Escribe el contenido antes de generar audio.')
+//                             ->warning()
+//                             ->send();
+//                         return;
+//                     }
 
-                    // Determinar el modelo y contexto
-                    $target = null;
-                    $contextInfo = [];
+//                     // Determinar el modelo y contexto
+//                     $target = null;
+//                     $contextInfo = [];
                     
-                    if ($prefix === 'article_details') {
-                        if (!$record || !$record->exists) {
-                            Notification::make()
-                                ->title('Guarda el artículo primero')
-                                ->body('Debes guardar el contenido antes de generar audio.')
-                                ->warning()
-                                ->send();
-                            return;
-                        }
-                        $target = $record;
-                        $contextInfo = [
-                            'type' => 'article',
-                            'title' => $record->title,
-                        ];
-                    } else {
-                        $lessonId = $get('id');
-                        if (!$lessonId) {
-                            Notification::make()
-                                ->title('Guarda la lección primero')
-                                ->body('Debes guardar el contenido antes de generar audio.')
-                                ->warning()
-                                ->send();
-                            return;
-                        }
+//                     if ($prefix === 'article_details') {
+//                         if (!$record || !$record->exists) {
+//                             Notification::make()
+//                                 ->title('Guarda el artículo primero')
+//                                 ->body('Debes guardar el contenido antes de generar audio.')
+//                                 ->warning()
+//                                 ->send();
+//                             return;
+//                         }
+//                         $target = $record;
+//                         $contextInfo = [
+//                             'type' => 'article',
+//                             'title' => $record->title,
+//                         ];
+//                     } else {
+//                         $lessonId = $get('id');
+//                         if (!$lessonId) {
+//                             Notification::make()
+//                                 ->title('Guarda la lección primero')
+//                                 ->body('Debes guardar el contenido antes de generar audio.')
+//                                 ->warning()
+//                                 ->send();
+//                             return;
+//                         }
                         
-                        $target = \App\Models\Lesson::find($lessonId);
-                        if ($target) {
-                            $contextInfo = [
-                                'type' => 'lesson',
-                                'lesson_title' => $target->title,
-                                'course_title' => $target->educationalContent->title ?? 'Curso',
-                            ];
+//                         $target = \App\Models\Lesson::find($lessonId);
+//                         if ($target) {
+//                             $contextInfo = [
+//                                 'type' => 'lesson',
+//                                 'lesson_title' => $target->title,
+//                                 'course_title' => $target->educationalContent->title ?? 'Curso',
+//                             ];
+//                         }
+//                     }
+
+//                     $voiceId = $get("{$prefix}{$dot}voice_id") ?? 'Charon';
+
+//                     \App\Jobs\ProcessAudioFull::dispatch(
+//                         $target, 
+//                         $text, 
+//                         $voiceId, 
+//                         auth()->user(), 
+//                         $prefix,
+//                         $contextInfo
+//                     );
+
+//                     Notification::make()
+//                         ->title('Generando audio...')
+//                         ->body('Te notificaremos cuando esté listo.')
+//                         ->info()
+//                         ->send();
+//                 }),
+//         ]);
+// }
+
+    public static function getAudioSectionSchema(string $prefix = ''): Section
+    {
+        $dot = filled($prefix) ? '.' : '';
+
+        return Section::make('Audio del Contenido')
+            ->description('Selecciona una voz para generar automáticamente la versión en audio del contenido redactado.')
+            ->icon('heroicon-o-speaker-wave')
+            ->collapsed()
+            ->collapsible()
+            ->schema([
+                ToggleButtons::make("{$prefix}{$dot}voice_id")
+                    ->label('Selecciona una voz')
+                    ->options([
+                        '94zOad0g7T7K4oa7zhDq' => 'Mauricio',
+                        'V6isiXLBuRuM7uwHOVBA' => 'Luisa',
+                        'W1hAcdh0RNsPYUA7fkJh' => 'El Faraón',
+                    ])
+                    ->icons([
+                        '94zOad0g7T7K4oa7zhDq' => 'heroicon-m-microphone',
+                        'V6isiXLBuRuM7uwHOVBA' => 'heroicon-m-microphone',
+                        'W1hAcdh0RNsPYUA7fkJh' => 'heroicon-m-microphone',
+                    ])
+                    ->colors([
+                        '94zOad0g7T7K4oa7zhDq' => 'info',
+                        'V6isiXLBuRuM7uwHOVBA' => 'danger',
+                        'W1hAcdh0RNsPYUA7fkJh' => 'warning',
+                    ])
+                    ->default('94zOad0g7T7K4oa7zhDq')
+                    ->required()
+                    ->inline()
+                    ->live(),
+
+                Hidden::make("{$prefix}{$dot}audio_timestamps"),
+                Hidden::make("{$prefix}{$dot}audio_url")->live(),
+            ])
+            ->footerActions([
+                MediaAction::make('preview_voice')
+                    ->label('Previsualizar voz')
+                    ->icon('heroicon-o-play')
+                    ->color('secondary')
+                    ->visible(fn (Get $get) => blank($get("{$prefix}{$dot}audio_url")))
+                    ->media(fn (Get $get) => match ($get("{$prefix}{$dot}voice_id")) {
+                        '94zOad0g7T7K4oa7zhDq' => asset('audio/voice_preview_mauricio.mp3'),
+                        'V6isiXLBuRuM7uwHOVBA' => asset('audio/voice_preview_luisa.mp3'),
+                        'W1hAcdh0RNsPYUA7fkJh' => asset('audio/voice_preview_elfaraon.mp3'),
+                        default => null,
+                    })
+                    ->mediaType(MediaAction::TYPE_AUDIO)
+                    ->modalHeading('Previsualización de la voz')
+                    ->disableDownload(),
+
+                MediaAction::make('listen_generated_audio')
+                    ->label('Escuchar audio generado')
+                    ->icon('heroicon-o-play')
+                    ->color('success')
+                    ->visible(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")))
+                    ->media(fn (Get $get) => $get("{$prefix}{$dot}audio_url"))
+                    ->mediaType(MediaAction::TYPE_AUDIO)
+                    ->modalHeading('Audio generado')
+                    ->disableDownload(),
+
+                Action::make('generate_audio')
+                    ->label(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")) ? 'Regenerar audio' : 'Generar audio')
+                    ->icon('heroicon-m-speaker-wave')
+                    ->color('primary')
+                    ->requiresConfirmation()
+                    ->action(function (Set $set, Get $get) use ($prefix, $dot) {
+                        $sourceField = filled($prefix) ? "{$prefix}.content_text" : "content_text";
+                        $text = strip_tags($get($sourceField) ?? '');
+
+                        $voiceId = $get("{$prefix}{$dot}voice_id");
+
+                        if (empty(trim($text))) {
+                            Notification::make()->title('Contenido vacío')->danger()->send();
+                            return;
                         }
-                    }
 
-                    $voiceId = $get("{$prefix}{$dot}voice_id") ?? 'Charon';
+                        try {
+                            $service = new ElevenLabsService;
+                            $result = $service->generate($text, $voiceId);
 
-                    \App\Jobs\ProcessAudioFull::dispatch(
-                        $target, 
-                        $text, 
-                        $voiceId, 
-                        auth()->user(), 
-                        $prefix,
-                        $contextInfo
-                    );
+                            $set("{$prefix}{$dot}audio_url", $result['audio_url']);
 
-                    Notification::make()
-                        ->title('Generando audio...')
-                        ->body('Te notificaremos cuando esté listo.')
-                        ->info()
-                        ->send();
-                }),
-        ]);
-}
+                            // Guardamos solo el array de palabras con timestamps (formato limpio y útil)
+                            $set("{$prefix}{$dot}audio_timestamps", json_encode($result['audio_timestamps']['words'] ?? []));
 
-    // public static function getAudioSectionSchema(string $prefix = ''): Section
-    // {
-    //     $dot = filled($prefix) ? '.' : '';
+                            // Actualizar duración estimada
+                            $set('estimated_duration', $result['duration']);
 
-    //     return Section::make('Audio del Contenido')
-    //         ->description('Selecciona una voz para generar automáticamente la versión en audio del contenido redactado.')
-    //         ->icon('heroicon-o-speaker-wave')
-    //         ->collapsed()
-    //         ->collapsible()
-    //         ->schema([
-    //             ToggleButtons::make("{$prefix}{$dot}voice_id")
-    //                 ->label('Selecciona una voz')
-    //                 ->options([
-    //                     '94zOad0g7T7K4oa7zhDq' => 'Mauricio',
-    //                     'V6isiXLBuRuM7uwHOVBA' => 'Luisa',
-    //                     'W1hAcdh0RNsPYUA7fkJh' => 'El Faraón',
-    //                 ])
-    //                 ->icons([
-    //                     '94zOad0g7T7K4oa7zhDq' => 'heroicon-m-microphone',
-    //                     'V6isiXLBuRuM7uwHOVBA' => 'heroicon-m-microphone',
-    //                     'W1hAcdh0RNsPYUA7fkJh' => 'heroicon-m-microphone',
-    //                 ])
-    //                 ->colors([
-    //                     '94zOad0g7T7K4oa7zhDq' => 'info',
-    //                     'V6isiXLBuRuM7uwHOVBA' => 'danger',
-    //                     'W1hAcdh0RNsPYUA7fkJh' => 'warning',
-    //                 ])
-    //                 ->default('94zOad0g7T7K4oa7zhDq')
-    //                 ->required()
-    //                 ->inline()
-    //                 ->live(),
-
-    //             Hidden::make("{$prefix}{$dot}audio_timestamps"),
-    //             Hidden::make("{$prefix}{$dot}audio_url")->live(),
-    //         ])
-    //         ->footerActions([
-    //             MediaAction::make('preview_voice')
-    //                 ->label('Previsualizar voz')
-    //                 ->icon('heroicon-o-play')
-    //                 ->color('secondary')
-    //                 ->visible(fn (Get $get) => blank($get("{$prefix}{$dot}audio_url")))
-    //                 ->media(fn (Get $get) => match ($get("{$prefix}{$dot}voice_id")) {
-    //                     '94zOad0g7T7K4oa7zhDq' => asset('audio/voice_preview_mauricio.mp3'),
-    //                     'V6isiXLBuRuM7uwHOVBA' => asset('audio/voice_preview_luisa.mp3'),
-    //                     'W1hAcdh0RNsPYUA7fkJh' => asset('audio/voice_preview_elfaraon.mp3'),
-    //                     default => null,
-    //                 })
-    //                 ->mediaType(MediaAction::TYPE_AUDIO)
-    //                 ->modalHeading('Previsualización de la voz')
-    //                 ->disableDownload(),
-
-    //             MediaAction::make('listen_generated_audio')
-    //                 ->label('Escuchar audio generado')
-    //                 ->icon('heroicon-o-play')
-    //                 ->color('success')
-    //                 ->visible(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")))
-    //                 ->media(fn (Get $get) => $get("{$prefix}{$dot}audio_url"))
-    //                 ->mediaType(MediaAction::TYPE_AUDIO)
-    //                 ->modalHeading('Audio generado')
-    //                 ->disableDownload(),
-
-    //             Action::make('generate_audio')
-    //                 ->label(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")) ? 'Regenerar audio' : 'Generar audio')
-    //                 ->icon('heroicon-m-speaker-wave')
-    //                 ->color('primary')
-    //                 ->requiresConfirmation()
-    //                 ->action(function (Set $set, Get $get) use ($prefix, $dot) {
-    //                     $sourceField = filled($prefix) ? "{$prefix}.content_text" : "content_text";
-    //                     $text = strip_tags($get($sourceField) ?? '');
-
-    //                     $voiceId = $get("{$prefix}{$dot}voice_id");
-
-    //                     if (empty(trim($text))) {
-    //                         Notification::make()->title('Contenido vacío')->danger()->send();
-    //                         return;
-    //                     }
-
-    //                     try {
-    //                         $service = new ElevenLabsService;
-    //                         $result = $service->generate($text, $voiceId);
-
-    //                         $set("{$prefix}{$dot}audio_url", $result['audio_url']);
-
-    //                         // Guardamos solo el array de palabras con timestamps (formato limpio y útil)
-    //                         $set("{$prefix}{$dot}audio_timestamps", json_encode($result['audio_timestamps']['words'] ?? []));
-
-    //                         // Actualizar duración estimada
-    //                         $set('estimated_duration', $result['duration']);
-
-    //                         Notification::make()
-    //                             ->title('Audio generado correctamente')
-    //                             ->success()
-    //                             ->send();
-    //                     } catch (\Throwable $e) {
-    //                         Notification::make()
-    //                             ->title('Error al generar audio')
-    //                             ->body($e->getMessage())
-    //                             ->danger()
-    //                             ->send();
-    //                     }
-    //                 }),
-    //         ]);
-    // }
+                            Notification::make()
+                                ->title('Audio generado correctamente')
+                                ->success()
+                                ->send();
+                        } catch (\Throwable $e) {
+                            Notification::make()
+                                ->title('Error al generar audio')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+            ]);
+    }
 
     public static function getActivitySchema(): array
 {

@@ -94,6 +94,12 @@ class EducationalContentsTable
                         EducationalContent::STATUS_PUBLISHED => 'success',
                         default => 'gray',
                     }),
+                Tables\Columns\TextColumn::make('author.full_name')
+                    ->label('Autor')
+                    ->searchable()
+                    ->sortable()
+                    ,
+                        
 
                 Tables\Columns\IconColumn::make('is_published')
                     ->label('Publicado')

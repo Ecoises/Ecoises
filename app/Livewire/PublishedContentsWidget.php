@@ -13,11 +13,22 @@ class PublishedContentsWidget extends StatsOverviewWidget
 
     protected function getStats(): array
 {
-    $publicados = EducationalContent::where('is_published', true)->count() ?? 0;
+    $query = EducationalContent::where('is_published', true);
+    
+    if (auth()->user()->hasRole('educador')) {
+        $query->where('author_id', auth()->id());
+    }
 
-    $publicadosMes = EducationalContent::where('is_published', true)
-        ->where('created_at', '>=', Carbon::now()->subMonth())
-        ->count();
+    $publicados = $query->count() ?? 0;
+
+    $queryMes = EducationalContent::where('is_published', true)
+        ->where('created_at', '>=', Carbon::now()->subMonth());
+        
+    if (auth()->user()->hasRole('educador')) {
+        $queryMes->where('author_id', auth()->id());
+    }
+
+    $publicadosMes = $queryMes->count();
 
     return [
         Stat::make('Publicados', $publicados)
