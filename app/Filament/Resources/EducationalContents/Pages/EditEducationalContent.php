@@ -8,6 +8,7 @@ use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Filament\Notifications\Notification;
+use Illuminate\Contracts\Support\Htmlable;
 
 class EditEducationalContent extends EditRecord
 {
@@ -18,6 +19,14 @@ class EditEducationalContent extends EditRecord
         return [
             DeleteAction::make(),
         ];
+    }
+
+    public function getTitle(): string|Htmlable
+    {
+        /** @var Post */
+        $record = $this->getRecord();
+
+        return $record->title;
     }
 
     protected function getSavedNotification(): ?Notification

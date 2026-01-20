@@ -96,8 +96,8 @@ class EducationalContentForm
                                     Select::make('content_type')
                                         ->label('Tipo de Contenido')
                                         ->options([
-                                            'course' => 'Curso Modular',
-                                            'article' => 'Artículo Simple',
+                                            'course' => 'Curso',
+                                            'article' => 'Artículo',
                                         ])
                                         ->default('course')
                                         ->required()
@@ -244,11 +244,10 @@ class EducationalContentForm
                                         ->defaultItems(0)
                                         ->addActionLabel('Añadir nueva actividad')
                                         ->reorderableWithButtons()
-                                        ->itemLabel(fn (array $state): ?string => $state['title'] ?? null)
+                                        ->itemLabel(fn (array $state): ?string => $state['activity_type'] ?? null)
                                         ->collapsed(),
                                 ])
                                 ->collapsible()
-                                ->collapsed()
                                 ->itemLabel(fn (array $state): ?string => $state['title'] ?? null),
 
                             // SECCIÓN ARTÍCULOS: Contenido Directo + Actividades

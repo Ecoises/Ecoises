@@ -5,6 +5,7 @@ namespace App\Filament\Resources\EducationalContents\Pages;
 use App\Filament\Resources\EducationalContents\EducationalContentResource;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Contracts\Support\Htmlable;
 
 class ViewEducationalContent extends ViewRecord
 {
@@ -15,5 +16,13 @@ class ViewEducationalContent extends ViewRecord
         return [
             EditAction::make(),
         ];
+    }
+
+    public function getTitle(): string|Htmlable
+    {
+        /** @var Post */
+        $record = $this->getRecord();
+
+        return $record->title;
     }
 }

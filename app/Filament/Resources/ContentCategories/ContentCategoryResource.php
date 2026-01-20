@@ -2,7 +2,8 @@
 
 namespace App\Filament\Resources\ContentCategories;
 
-use App\Filament\Resources\ContentCategories\Pages\ManageContentCategories;
+use App\Filament\Resources\ContentCategories\Pages;
+use App\Filament\Resources\ContentCategories\RelationManagers;
 use App\Models\ContentCategory;
 use BackedEnum;
 use UnitEnum;
@@ -60,6 +61,19 @@ class ContentCategoryResource extends Resource
             ->recordTitleAttribute('name')
             ->columns([
                 TextColumn::make('name')
+                    ->label('Nombre')
+                    ->badge()
+                    ->searchable(),
+                TextColumn::make('slug')
+                    ->label('Slug')
+                    ->searchable(),
+                TextColumn::make('created_at')
+                    ->label('Creado')
+                    ->dateTime('d/m/Y H:i')
+                    ->searchable(),
+                TextColumn::make('updated_at')
+                    ->label('Actualizado')
+                    ->dateTime('d/m/Y H:i')
                     ->searchable(),
             ])
             ->filters([
@@ -76,10 +90,19 @@ class ContentCategoryResource extends Resource
             ]);
     }
 
+    public static function getRelations(): array
+    {
+        return [
+            RelationManagers\ContentRelationManager::class,
+        ];
+    }
+
     public static function getPages(): array
     {
         return [
-            'index' => ManageContentCategories::route('/'),
+            'index' => Pages\ListContentCategories::route('/'),
+            'create' => Pages\CreateContentCategory::route('/create'),
+            'edit' => Pages\EditContentCategory::route('/{record}/edit'),
         ];
     }
 }

@@ -84,7 +84,7 @@ class AdminPanelProvider extends PanelProvider
                 AuthUIEnhancerPlugin::make()
                 ->showEmptyPanelOnMobile(false)
                 ->emptyPanelBackgroundImageOpacity('80%')
-                ->emptyPanelBackgroundImageUrl(asset('images/login.jpg')),
+                ->emptyPanelBackgroundImageUrl(asset('images/login.webp')),
             ])
             ->middleware([
                 EncryptCookies::class,
