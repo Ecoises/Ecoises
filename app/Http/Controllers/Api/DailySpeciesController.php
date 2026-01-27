@@ -26,53 +26,94 @@ class DailySpeciesController extends Controller
 
     private function generateDailySpecies()
     {
-        // Get random taxa that have API references (likely to have photos)
-        // We fetch a bit more than 3 to ensure we find ones with photos
+        // 1. Get candidate taxa (fetch more than needed to ensure we have good ones)
         $taxa = Taxa::with(['apiReferences' => function ($query) {
-                // Ensure we prefer primary api references
                 $query->orderBy('is_primary', 'desc');
             }])
-            ->whereHas('apiReferences')
+            // We only want species with actual API data which usually means they have photos
+            ->whereHas('apiReferences') 
             ->inRandomOrder()
-            ->limit(10)
+            ->limit(6) // Fetch 6 candidates to select 3
             ->get();
 
-        $selectedSpecies = [];
-        $apiKey = env('GOOGLE_AI_STUDIO_KEY');
+        // 2. Filter valid candidates (must have a medium photo)
+        $candidates = $taxa->filter(function ($taxon) {
+            return !empty($taxon->enriched_data['default_photo']['medium_url']);
+        })->take(3); // Take top 3 valid ones
+
+        // If we don't have enough candidates, we might return less or handle it. 
+        // For now, let's proceed with whatever we have.
         
-        if (!$apiKey) {
-             Log::error('GOOGLE_AI_STUDIO_KEY is missing in .env');
-             // Fallback or error? We'll return what we have or generic data
+        $apiKey = env('GOOGLE_AI_STUDIO_KEY');
+        $model = "gemini-3-flash-preview"; // Exactly what the user asked for.
+
+        $results = [];
+
+        // 3. Prepare requests for parallel execution if API key is present
+        if ($apiKey && $candidates->isNotEmpty()) {
+            
+            $responses = Http::pool(function ($pool) use ($candidates, $apiKey, $model) {
+                foreach ($candidates as $taxon) {
+                    $scientificName = $taxon->scientific_name;
+                    $commonName = $taxon->common_name ?? $scientificName;
+                    
+                    // Specific prompt for this species
+                    $prompt = "Genera un único dato curioso, muy interesante y educativo sobre la especie '{$commonName}' ({$scientificName}). El dato debe ser corto (máximo 150 caracteres), en español, y diseñado para captar la atención. No pongas comillas ni intros.";
+                    $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}";
+
+                    $pool->as($taxon->id)->timeout(15)->post($url, [
+                        'contents' => [['parts' => [['text' => $prompt]]]],
+                        'generationConfig' => [
+                            'thinkingConfig' => [
+                                'thinkingLevel' => 'low'  
+                            ]
+                        ]
+                    ]);
+                }
+            });
+
         }
 
-        foreach ($taxa as $taxon) {
-            if (count($selectedSpecies) >= 3) {
-                break;
+        // 4. Process results and build final array
+        foreach ($candidates as $taxon) {
+            $funFact = null;
+
+            // Try to get the API response if available
+            if (isset($responses) && isset($responses[$taxon->id])) {
+                $response = $responses[$taxon->id];
+                if ($response->successful()) {
+                    $data = $response->json();
+                    $funFact = $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
+                } else {
+                    Log::warning("Gemini API failed for {$taxon->scientific_name}: " . $response->body());
+                }
+            } else if (isset($responses) && $responses[$taxon->id] instanceof \Illuminate\Http\Client\ConnectionException) {
+                 Log::warning("Gemini API timed out for {$taxon->scientific_name}");
             }
 
-            $enrichedData = $taxon->enriched_data;
-            if (empty($enrichedData['default_photo']['medium_url'])) {
-                continue;
+            // Fallback 1: Wikipedia Summary (truncated)
+            if (empty($funFact) && !empty($taxon->enriched_data['wikipedia_summary'])) {
+                $funFact = \Illuminate\Support\Str::limit($taxon->enriched_data['wikipedia_summary'], 140);
             }
 
-            $scientificName = $taxon->scientific_name;
-            $commonName = $taxon->common_name ?? $scientificName;
+            // Fallback 2: Generic motivational message
+            if (empty($funFact)) {
+                $family = $taxon->family ?? 'esta familia';
+                $funFact = "Una especie fascinante de {$family}, vital para el equilibrio de nuestro ecosistema colombiano.";
+            }
 
-            // Generate Fun Fact with Gemini
-            $funFact = $this->generateFunFact($scientificName, $commonName, $apiKey);
-
-            $selectedSpecies[] = [
+            $results[] = [
                 'id' => $taxon->id,
-                'name' => $commonName, // Use common name as main title
-                'scientificName' => $scientificName,
-                'image' => $enrichedData['default_photo']['medium_url'],
+                'name' => $taxon->common_name ?? $taxon->scientific_name,
+                'scientificName' => $taxon->scientific_name,
+                'image' => $taxon->enriched_data['default_photo']['medium_url'],
                 'funFact' => $funFact,
-                'author' => $enrichedData['default_photo']['attribution'] ?? 'Desconocido',
+                'author' => $taxon->enriched_data['default_photo']['attribution'] ?? 'Desconocido',
             ];
         }
-        
-        // If no species found (empty DB), return placeholders
-        if (empty($selectedSpecies)) {
+
+        // 5. Emergency Fallback (if no candidates found at all)
+        if (empty($results)) {
              return [
                 [
                     'id' => 1,
@@ -95,13 +136,13 @@ class DailySpeciesController extends Controller
                     'name' => 'Rana Dorada',
                     'scientificName' => 'Phyllobates terribilis',
                     'image' => 'https://images.unsplash.com/photo-1544600277-27b2b3a9856f?auto=format&fit=crop&w=800&q=80',
-                    'funFact' => 'Esta pequeña rana es considerada el animal más venenoso del mundo; una sola tiene suficiente veneno para acabar con 10 hombres.',
+                    'funFact' => 'Considerada el animal más venenoso del mundo; una sola tiene suficiente veneno para acabar con 10 hombres.',
                     'author' => 'Unsplash',
                 ]
              ];
         }
 
-        return $selectedSpecies;
+        return $results;
     }
 
     public function speciesOfTheDay()
@@ -152,40 +193,5 @@ class DailySpeciesController extends Controller
         return response()->json($species);
     }
 
-    private function generateFunFact($scientificName, $commonName, $apiKey)
-    {
-        if (!$apiKey) {
-            return "Dato curioso no disponible (Falta configuración de API Key).";
-        }
 
-        try {
-            // Using Gemini 3 Flash Preview as per user availability
-            $model = "gemini-3-flash-preview"; 
-            $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}";
-
-            $prompt = "Genera un único dato curioso, muy interesante y educativo sobre la especie '{$commonName}' ({$scientificName}). El dato debe ser corto (máximo 150 caracteres), en español, y diseñado para captar la atención. No pongas comillas ni intros.";
-
-            $response = Http::post($url, [
-                'contents' => [
-                    [
-                        'parts' => [
-                            ['text' => $prompt]
-                        ]
-                    ]
-                ]
-            ]);
-
-            if ($response->successful()) {
-                $data = $response->json();
-                return $data['candidates'][0]['content']['parts'][0]['text'] ?? "Dato curioso no disponible.";
-            } else {
-                Log::error("Gemini API Error: " . $response->body());
-                return "Dato curioso no disponible temporalmente.";
-            }
-
-        } catch (\Exception $e) {
-            Log::error("Gemini API Exception: " . $e->getMessage());
-            return "Dato curioso no disponible.";
-        }
-    }
 }
