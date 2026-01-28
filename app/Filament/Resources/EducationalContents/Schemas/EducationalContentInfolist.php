@@ -136,6 +136,7 @@ class EducationalContentInfolist
                                 ->hiddenLabel()
                                 ->imageHeight(40)
                                 ->circular()
+                                ->disk('public')
                                 ->alignCenter(),
 
                             TextEntry::make('author.full_name')

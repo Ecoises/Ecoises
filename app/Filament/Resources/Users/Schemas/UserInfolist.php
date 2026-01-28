@@ -18,7 +18,9 @@ class UserInfolist
                 TextEntry::make('email_verified_at')
                     ->dateTime(),
                 TextEntry::make('google_id'),
-                TextEntry::make('avatar'),
+                \Filament\Infolists\Components\ImageEntry::make('avatar')
+                    ->circular()
+                    ->disk('public'),
                 TextEntry::make('total_score')
                     ->numeric(),
                 TextEntry::make('level')

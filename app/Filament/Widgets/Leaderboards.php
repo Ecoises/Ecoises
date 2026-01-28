@@ -27,7 +27,8 @@ class Leaderboards extends TableWidget
                     ->rowIndex(),
                 Tables\Columns\ImageColumn::make('avatar')
                     ->label('Avatar')
-                    ->circular(),
+                    ->circular()
+                    ->disk('public'),
                 Tables\Columns\TextColumn::make('full_name')
                     ->label('Usuario')
                     ->searchable()
