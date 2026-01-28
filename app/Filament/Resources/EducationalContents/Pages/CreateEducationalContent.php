@@ -9,6 +9,7 @@ use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Filament\Notifications\Notification;
+use Filament\Actions\Action;
 
 class CreateEducationalContent extends CreateRecord
 {
@@ -17,6 +18,18 @@ class CreateEducationalContent extends CreateRecord
     protected function getFormActions(): array
     {
         return [];
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('cancel')
+                ->label('Cancelar')
+                ->outlined()
+                ->color('gray')
+                ->url(fn (): string => static::getResource()::getUrl('index'))
+                ->icon('heroicon-o-x-mark'),
+        ];
     }
 
     protected function getCreatedNotification(): ?Notification

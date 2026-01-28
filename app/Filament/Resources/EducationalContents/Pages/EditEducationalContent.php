@@ -8,6 +8,7 @@ use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Filament\Notifications\Notification;
+use Filament\Actions\Action;
 use Illuminate\Contracts\Support\Htmlable;
 
 class EditEducationalContent extends EditRecord
@@ -17,8 +18,21 @@ class EditEducationalContent extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            Action::make('cancel')
+                ->label('Cancelar')
+                ->outlined()
+                ->color('gray')
+                ->url(fn (): string => static::getResource()::getUrl('index'))
+                ->icon('heroicon-o-x-mark'),
+
+            DeleteAction::make()
+                ->icon('heroicon-o-trash'),
         ];
+    }
+
+    protected function getFormActions(): array
+    {
+        return [];
     }
 
     public function getTitle(): string|Htmlable
