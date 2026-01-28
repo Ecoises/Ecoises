@@ -172,6 +172,8 @@ class EducationalContentForm
                                         ->afterStateUpdated(fn (Set $set, $state) => $set('slug', Str::slug($state))),
 
                                     Hidden::make('slug'),
+                                    
+                                    Hidden::make('estimated_duration'),
 
                                     RichEditor::make('content_text')
                                     ->label('Contenido de la Lección')

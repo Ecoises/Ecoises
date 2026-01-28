@@ -54,6 +54,18 @@ class Lesson extends Model
 
    protected static function booted()
     {
+        // Calcular duración estimada antes de guardar
+        static::saving(function ($lesson) {
+            // Si el contenido de texto cambió, recalcular la duración
+            if ($lesson->isDirty('content_text')) {
+                $plainText = strip_tags($lesson->content_text ?? '');
+                $words = str_word_count($plainText);
+                // 200 palabras por minuto es el estándar de lectura
+                $minutes = (int) ceil($words / 200);
+                $lesson->estimated_duration = max(1, $minutes);
+            }
+        });
+
         // Al guardar la lección, avisa al Contenido Educativo (Padre) 
         // para que sume el tiempo de todas sus lecciones.
         static::saved(function ($lesson) {
