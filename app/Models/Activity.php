@@ -44,6 +44,8 @@ class Activity extends Model
         'is_true',
         'correct_answer',
         'true_false_feedback',
+        'feedback_correct',
+        'feedback_incorrect',
         'items',
         'pairs',
     ];
@@ -62,7 +64,7 @@ class Activity extends Model
 
     public function getIsTrueAttribute()
     {
-        $value = $this->content_data['is_true'] ?? null;
+        $value = $this->content_data['correct_answer'] ?? $this->content_data['is_true'] ?? null;
         
         // Convertir string a boolean si es necesario
         if ($value === 'true') return true;
@@ -75,7 +77,7 @@ class Activity extends Model
     {
         // Para True/False
         if ($this->activity_type === 'quiz_true_false') {
-            $value = $this->content_data['is_true'] ?? null;
+            $value = $this->content_data['correct_answer'] ?? $this->content_data['is_true'] ?? null;
             
             // Convertir string a boolean si es necesario (retrocompatibilidad)
             if ($value === 'true') return true;
@@ -96,6 +98,16 @@ class Activity extends Model
     public function getTrueFalseFeedbackAttribute()
     {
         return $this->content_data['true_false_feedback'] ?? null;
+    }
+
+    public function getFeedbackCorrectAttribute()
+    {
+        return $this->content_data['feedback_correct'] ?? null;
+    }
+
+    public function getFeedbackIncorrectAttribute()
+    {
+        return $this->content_data['feedback_incorrect'] ?? null;
     }
 
     public function getItemsAttribute()

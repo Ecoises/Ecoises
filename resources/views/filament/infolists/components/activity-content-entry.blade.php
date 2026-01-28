@@ -101,18 +101,25 @@
             @endif
 
         @elseif($activityType === 'quiz_true_false')
-            {{-- Verdadero/Falso --}}
             @php
                 $correctAnswer = null;
                 $explanation = null;
+                $feedbackCorrect = null;
+                $feedbackIncorrect = null;
                 
                 if (is_array($state)) {
-                    // Estructura: {"is_true": "true/false", "true_false_feedback": "texto"}
-                    if (isset($state['is_true'])) {
+                    // Nueva estructura: {"correct_answer": "true/false", "feedback_correct": "...", "feedback_incorrect": "..."}
+                    if (isset($state['correct_answer'])) {
+                        $correctAnswer = $state['correct_answer'] === 'true' || $state['correct_answer'] === true;
+                        $feedbackCorrect = $state['feedback_correct'] ?? null;
+                        $feedbackIncorrect = $state['feedback_incorrect'] ?? null;
+                    } 
+                    // Estructura anterior: {"is_true": "true/false", "true_false_feedback": "texto"}
+                    elseif (isset($state['is_true'])) {
                         $correctAnswer = $state['is_true'] === 'true' || $state['is_true'] === true;
                         $explanation = $state['true_false_feedback'] ?? null;
                     }
-                    // Estructura alternativa: [true/false, "explicación"]
+                    // Estructura alternativa antigua: [true/false, "explicación"]
                     elseif (isset($state[0])) {
                         $correctAnswer = $state[0] === 'true' || $state[0] === true;
                         $explanation = $state[1] ?? null;
@@ -167,7 +174,37 @@
                     </div>
                 </div>
                 
-                {{-- Explicación si existe --}}
+                {{-- Explicación / Feedback Correcto --}}
+                @if($feedbackCorrect && $correctAnswer !== null)
+                     <div class="mt-3 p-4 bg-success-50 border-l-4 border-success-500 rounded-r-lg dark:bg-success-900/20 dark:border-success-700">
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-success-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <div>
+                                <p class="font-semibold text-success-900 dark:text-success-100 mb-1">Feedback si aciertan</p>
+                                <p class="text-sm text-success-800 dark:text-success-200">{{ $feedbackCorrect }}</p>
+                            </div>
+                        </div>
+                    </div>
+                @endif
+
+                 {{-- Explicación / Feedback Incorrecto --}}
+                 @if($feedbackIncorrect && $correctAnswer !== null)
+                     <div class="mt-3 p-4 bg-danger-50 border-l-4 border-danger-500 rounded-r-lg dark:bg-danger-900/20 dark:border-danger-700">
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <div>
+                                <p class="font-semibold text-danger-900 dark:text-danger-100 mb-1">Feedback si fallan</p>
+                                <p class="text-sm text-danger-800 dark:text-danger-200">{{ $feedbackIncorrect }}</p>
+                            </div>
+                        </div>
+                    </div>
+                @endif
+                
+                {{-- Explicación Antigua (Fallback) --}}
                 @if($explanation)
                     <div class="mt-3 p-4 bg-info-50 border-l-4 border-info-500 rounded-r-lg dark:bg-info-900/20 dark:border-info-700">
                         <div class="flex items-start gap-2">
