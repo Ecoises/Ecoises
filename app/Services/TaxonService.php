@@ -295,9 +295,31 @@ class TaxonService
      */
     public function getTaxonById(int $id, bool $forceRefresh = false): array
     {
+        $localTaxon = null;
+
         // Si no se fuerza la actualización, buscamos primero en la base de datos local
         if (!$forceRefresh) {
-            $localTaxon = Taxa::with(['apiReferences', 'observations'])->find($id);
+            // 1. Intentar por ID Local (PK)
+            $localTaxon = Taxa::with(['apiReferences'])->find($id);
+
+            // 2. Si no encuentra por ID Local, intentar por ID Externo (iNaturalist)
+            // Esto soluciona el problema de IDs retornados por la búsqueda de API
+            if (!$localTaxon) {
+                Log::info('🔍 Buscando taxón por external_id (fallback)', ['id' => $id]);
+                $reference = \App\Models\TaxonApiReference::where('external_id', $id)
+                    ->where('api_source', 'inaturalist')
+                    ->first();
+                
+                if ($reference) {
+                    $localTaxon = Taxa::with(['apiReferences'])->find($reference->taxon_id);
+                    if ($localTaxon) {
+                         Log::info('✅ Taxón local encontrado por external_id', [
+                             'external_id' => $id, 
+                             'local_id' => $localTaxon->id
+                         ]);
+                    }
+                }
+            }
             
             if ($localTaxon) {
                 // VERIFICACIÓN DE CALIDAD DE DATOS (Auto-Upgrade)
@@ -315,7 +337,8 @@ class TaxonService
                 $isComplete = $hasAncestors && ($hasGallery || $hasSummary);
 
                 Log::info('🧐 Verificando completitud de taxón local', [
-                    'id' => $id,
+                    'id' => $localTaxon->id, // Usar ID real del objeto
+                    'searched_id' => $id,
                     'has_gallery' => $hasGallery, 
                     'gallery_count' => count($enrichedData['gallery'] ?? []),
                     'has_ancestors' => $hasAncestors,
@@ -334,7 +357,7 @@ class TaxonService
                 
                 // Si llegamos aquí, falta información.
                 Log::info('🔄 Actualizando taxón incompleto', [
-                    'id' => $id, 
+                    'id' => $localTaxon->id, 
                     'missing' => [
                         'gallery' => !$hasGallery,
                         'ancestors' => !$hasAncestors,
@@ -1334,33 +1357,46 @@ public function mapEstablishmentMeans(?string $status): array
              
              if (!$result['success'] || empty($result['data'])) return $result;
 
-             // B. ENRIQUECIMIENTO (Batch /taxa)
-             // Esto soluciona la falta de establishment_means/badges
+             // B. ENRIQUECIMIENTO (Batch /taxa) y LOCALIZACIÓN DE IDs
              $items = collect($result['data']);
              $ids = $items->pluck('id')->toArray();
              
              if (!empty($ids)) {
                  $enrichedResponse = $this->iNaturalistService->getTaxaByIds($ids);
+                 $enrichedMap = $enrichedResponse['success'] ? collect($enrichedResponse['data'])->keyBy('id') : collect();
                  
-                 if ($enrichedResponse['success']) {
-                     $enrichedMap = collect($enrichedResponse['data'])->keyBy('id');
+                 // PRE-LAVADO DE IDs (Solo lectura rápida)
+                 // Solo mapeamos si YA EXISTE. No creamos nada aquí para no ralentizar.
+                 $existingRefs = \App\Models\TaxonApiReference::whereIn('external_id', $ids)
+                    ->where('api_source', 'inaturalist')
+                    ->pluck('taxon_id', 'external_id');
+                 
+                 // Procesar lista
+                 $result['data'] = $items->map(function($item) use ($enrichedMap, $existingRefs) {
+                     $externalId = $item['id'];
                      
-                     // Fusionar datos enriquecidos sobre los originales
-                     $result['data'] = $items->map(function($item) use ($enrichedMap) {
-                         if ($rich = $enrichedMap->get($item['id'])) {
-                             // Sobrescribir campos clave que falten en species_counts
-                             $item['establishment_status_colombia'] = $rich['establishment_status_colombia'] ?? $item['establishment_status_colombia'];
-                             $item['native'] = $rich['native'];
-                             $item['endemic'] = $rich['endemic'];
-                             $item['introduced'] = $rich['introduced'];
-                             $item['conservation_status'] = $rich['conservation_status'] ?? $item['conservation_status'];
-                         }
-                         return $item;
-                     })->toArray();
-                 }
+                     // 1. Aplicar enriquecimiento de datos
+                     if ($rich = $enrichedMap->get($externalId)) {
+                         $item['establishment_status_colombia'] = $rich['establishment_status_colombia'] ?? $item['establishment_status_colombia'];
+                         $item['native'] = $rich['native'];
+                         $item['endemic'] = $rich['endemic'];
+                         $item['introduced'] = $rich['introduced'];
+                         $item['conservation_status'] = $rich['conservation_status'] ?? $item['conservation_status'];
+                         $item['scientific_name'] = $rich['scientific_name'] ?? $item['scientific_name'];
+                     }
+                     
+                     // 2. RESOLUCIÓN DE ID (Solo si ya existe)
+                     if (isset($existingRefs[$externalId])) {
+                         $item['id'] = $existingRefs[$externalId];
+                     } 
+                     // Si no existe, dejamos el ID externo.
+                     // El backend en show() se encargará de resolverlo on-demand.
+                     
+                     return $item;
+                 })->toArray();
              }
              
-             $result['source'] = 'inat_optimized_enriched';
+             $result['source'] = 'inat_optimized_enriched_localized_read_only';
              $result['used_location'] = isset($inatParams['lat']) ? 'coords' : 'place_id';
              
              return $result;
