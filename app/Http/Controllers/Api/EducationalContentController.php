@@ -91,15 +91,31 @@ class EducationalContentController extends Controller
                 $content->lesson_progress = $lessonProgress;
             }
 
-            // Get user's successful activity attempts to mark as completed (guard against missing lessons)
+            // Get user's activity attempts with points (guard against missing lessons)
             $lessons = $content->lessons ?? collect();
             $activityIds = $lessons->pluck('activities')->flatten()->pluck('id');
-            $completedActivities = \App\Models\UserActivityAttempt::where('user_id', $user->id)
-                ->whereIn('activity_id', $activityIds)
-                ->where('is_correct', true)
-                ->pluck('activity_id')
-                ->toArray();
 
+            // Get all attempts for this user and activities
+            $activityAttempts = \App\Models\UserActivityAttempt::where('user_id', $user->id)
+                ->whereIn('activity_id', $activityIds)
+                ->get()
+                ->keyBy('activity_id');
+
+            // Build activity progress array
+            $activityProgress = [];
+            foreach ($activityIds as $activityId) {
+                $attempt = $activityAttempts->get($activityId);
+                $activityProgress[] = [
+                    'id' => $activityId,
+                    'is_completed' => $attempt && $attempt->is_correct,
+                    'points_earned' => $attempt ? $attempt->points_earned : 0,
+                ];
+            }
+
+            $content->activity_progress = $activityProgress;
+
+            // Keep backward compatibility
+            $completedActivities = $activityAttempts->where('is_correct', true)->keys()->toArray();
             $content->completed_activities = $completedActivities;
         }
 

@@ -20,9 +20,12 @@ class LessonController extends Controller
     /**
      * Mark a lesson as completed.
      */
-    public function complete(Request $request, $id)
+    public function complete(Request $request, $slugOrId)
     {
-        $lesson = Lesson::findOrFail($id);
+        // Try to find by slug first, then by ID for backwards compatibility
+        $lesson = Lesson::where('slug', $slugOrId)
+            ->orWhere('id', $slugOrId)
+            ->firstOrFail();
         $user = $request->user();
 
         try {
