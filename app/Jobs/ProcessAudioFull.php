@@ -53,12 +53,18 @@ class ProcessAudioFull implements ShouldQueue
             // 3. Guardar en base de datos
             if ($this->prefix === 'article_details') {
                 $articleDetails = ArticleDetails::firstOrCreate(
-                    ['educational_content_id' => $this->model->id],
+                    ['id' => $this->model->id],
                     ['content_text' => '', 'read_time' => 0]
                 );
-                $articleDetails->update(['audio_url' => $url]);
+                $articleDetails->update([
+                    'audio_url' => $url,
+                    'voice_id' => $this->voiceId
+                ]);
             } else {
-                $this->model->update(['audio_url' => $url]);
+                $this->model->update([
+                    'audio_url' => $url,
+                    'voice_id' => $this->voiceId
+                ]);
             }
 
             // 4. Notificación de éxito

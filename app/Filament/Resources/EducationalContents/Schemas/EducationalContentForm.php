@@ -381,11 +381,13 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
             ToggleButtons::make("{$prefix}{$dot}voice_id")
                 ->label('Selecciona una voz')
                 ->options([
-                    'Charon' => 'Mauricio',
-                    'Aoede' => 'Luisa',
-                    'Puck' => 'Faraón'
+                    'Charon' => 'Charon',
+                    'Aoede' => 'Aoede',
+                    'Puck' => 'Puck'
                 ])
                 ->default('Charon')
+                ->afterStateHydrated(fn ($component, $state) => blank($state) ? $component->state('Charon') : null)
+                ->required()
                 ->inline()
                 ->live(),
             
@@ -402,7 +404,7 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                 ->mediaType(MediaAction::TYPE_AUDIO),
 
             Action::make('generate')
-                ->label('Generar audio')
+                ->label(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")) ? 'Regenerar audio' : 'Generar audio')
                 ->icon('heroicon-m-speaker-wave')
                 ->color('primary')
                 ->modalHeading('Generar audio narrado')
