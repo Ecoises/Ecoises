@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     unzip \
     zlib1g-dev \
+    libicu-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd intl zip
