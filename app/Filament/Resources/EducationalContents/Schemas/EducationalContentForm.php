@@ -176,6 +176,7 @@ class EducationalContentForm
                                     Hidden::make('estimated_duration'),
 
                                     RichEditor::make('content_text')
+                                    ->resizableImages()
                                     ->label('Contenido de la Lección')
                                     ->required()
                                     ->fileAttachmentsDisk('public')
