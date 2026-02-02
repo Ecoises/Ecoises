@@ -13,7 +13,7 @@ RUN composer install \
     --no-dev \
     --no-interaction \
     --prefer-dist \
-    --ignore-platform-reqs=ext-intl
+    --ignore-platform-req=ext-intl
 
 # Permisos finales para Laravel
 RUN chown -R www-data:www-data /var/www/html/storage \
