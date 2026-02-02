@@ -1,28 +1,27 @@
+# Imagen base oficial con PHP 8.3 + Nginx + PHP-FPM preconfigurados para Laravel
 FROM serversideup/php:8.3-fpm-nginx
 
-# Instala extensiones PHP que necesitas
-RUN install-php-extensions \
-    pdo_mysql \
-    mbstring \
-    exif \
-    pcntl \
-    bcmath \
-    gd \
-    intl \
-    zip
-
-# Copia tu código
+# Copiamos el código del proyecto
+# --chown asegura permisos correctos desde el principio (usuario www-data)
 COPY --chown=www-data:www-data . /var/www/html
 
-# Instala Composer y dependencias
+# Instalamos Composer desde la imagen oficial
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-RUN composer install --optimize-autoloader --no-dev --no-interaction
 
-# Permisos
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+# Instalamos dependencias de PHP (solo producción, sin dev)
+RUN composer install \
+    --optimize-autoloader \
+    --no-dev \
+    --no-interaction \
+    --prefer-dist
 
-# Puerto que Railway espera
+# Ajustamos permisos para storage y bootstrap/cache (Laravel lo necesita)
+RUN chown -R www-data:www-data /var/www/html/storage \
+    && chown -R www-data:www-data /var/www/html/bootstrap/cache
+
+# Exponemos el puerto que usa Nginx en esta imagen (Railway lo detecta automáticamente)
 EXPOSE 8080
 
-# Comando por defecto (ya trae nginx + php-fpm)
+# Comando por defecto: inicia Nginx + PHP-FPM automáticamente
+# NO cambies esto, la imagen lo maneja sola
 CMD ["/usr/local/bin/start-container"]
