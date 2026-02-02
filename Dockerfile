@@ -1,41 +1,28 @@
-FROM php:8.3-fpm
+FROM serversideup/php:8.3-fpm-nginx
 
-# Instalamos dependencias en una sola capa y limpiamos todo al final
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    libpng-dev \
-    libjpeg-dev \
-    libfreetype6-dev \
-    libonig-dev \
-    libxml2-dev \
-    libzip-dev \
-    libicu-dev \
-    unzip \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) \
-        pdo_mysql \
-        mbstring \
-        exif \
-        pcntl \
-        bcmath \
-        gd \
-        intl \
-        zip \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# Instala extensiones PHP que necesitas
+RUN install-php-extensions \
+    pdo_mysql \
+    mbstring \
+    exif \
+    pcntl \
+    bcmath \
+    gd \
+    intl \
+    zip
 
+# Copia tu código
+COPY --chown=www-data:www-data . /var/www/html
+
+# Instala Composer y dependencias
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+RUN composer install --optimize-autoloader --no-dev --no-interaction
 
-WORKDIR /var/www
+# Permisos
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
-COPY . .
+# Puerto que Railway espera
+EXPOSE 8080
 
-RUN composer install --optimize-autoloader --no-dev --no-scripts --no-interaction
-
-# Permisos (muy importante para Laravel)
-RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
-
-EXPOSE 9000
-
-CMD ["php-fpm"]
+# Comando por defecto (ya trae nginx + php-fpm)
+CMD ["/usr/local/bin/start-container"]
