@@ -1,5 +1,5 @@
 FROM serversideup/php:8.3-fpm-nginx
-RUN find /etc/nginx -type f | head -50
+RUN find /etc/nginx -type f && echo "LISTO"
 
 COPY --chown=www-data:www-data . /var/www/html
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
