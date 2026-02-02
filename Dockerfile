@@ -1,33 +1,28 @@
 # Imagen base con PHP 8.3 + Nginx + PHP-FPM optimizada para Laravel
+# intl ya viene incluida, NO necesitas install-php-extensions
 FROM serversideup/php:8.3-fpm-nginx
 
-# Instalamos intl (obligatorio para Filament v4.5+)
-# Esto soluciona el error anterior de ext-intl
-RUN install-php-extensions intl
-
-# Copiamos todo el código directamente al directorio que espera la imagen
-# --chown evita problemas de permisos desde el principio
+# Copiamos el código con permisos correctos desde el principio
 COPY --chown=www-data:www-data . /var/www/html
 
 # Copiamos Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Instalamos dependencias (sin dev para producción)
+# Instalamos dependencias (Composer ya no se quejará de intl)
 RUN composer install \
     --optimize-autoloader \
     --no-dev \
     --no-interaction \
     --prefer-dist
 
-# Aseguramos permisos en storage y cache (aunque --chown ya ayuda)
+# Permisos finales para storage y cache (Laravel lo necesita)
 RUN chown -R www-data:www-data /var/www/html/storage \
     && chown -R www-data:www-data /var/www/html/bootstrap/cache \
     && chmod -R 775 /var/www/html/storage \
     && chmod -R 775 /var/www/html/bootstrap/cache
 
-# Exponemos el puerto que usa esta imagen (8080 por defecto)
+# Puerto que Railway espera (la imagen usa 8080 internamente)
 EXPOSE 8080
 
-# Comando por defecto de la imagen: inicia Nginx + PHP-FPM
-# NO lo cambies
+# Inicia Nginx + PHP-FPM automáticamente (script de la imagen)
 CMD ["/usr/local/bin/start-container"]
