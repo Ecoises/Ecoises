@@ -17,4 +17,4 @@ RUN chown -R www-data:www-data /var/www/html/storage \
 
 EXPOSE 8080
 
-CMD ["/bin/sh", "-c", "export NGINX_HOST_PORT=${PORT:-8080} && /usr/local/bin/start-container"]
+CMD ["/bin/sh", "-c", "echo '=== PORT=' && echo $PORT && echo '=== TEMPLATE ===' && cat /etc/nginx/nginx.conf.template && echo '=== SITE-OPTS ===' && cat /etc/nginx/site-opts.d/http.conf.template && echo '=== STARTING ===' && export NGINX_HOST_PORT=${PORT:-8080} && /usr/local/bin/start-container"]
