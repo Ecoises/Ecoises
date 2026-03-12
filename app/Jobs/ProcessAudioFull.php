@@ -7,6 +7,7 @@ use App\Models\Lesson;
 use App\Models\EducationalContent;
 use App\Models\ArticleDetails;
 use App\Services\GeminiAudioService;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -74,14 +75,14 @@ class ProcessAudioFull implements ShouldQueue
 
             $body = $this->contextInfo['type'] === 'article'
                 ? "Ya puedes escuchar la narración de tu artículo."
-                : "La lección del curso \"{$this->contextInfo['course_title']}\" ya tiene su audio.";
+                : "La lección del curso \"{$this->contextInfo['educational_content_title']}\" ya tiene su audio.";
 
             Notification::make()
                 ->title($title)
                 ->body($body)
                 ->success()
                 ->actions([
-                    \Filament\Notifications\Actions\Action::make('listen')
+                    Action::make('listen')
                         ->label('Escuchar ahora')
                         ->url($url)
                         ->openUrlInNewTab(),
@@ -92,17 +93,6 @@ class ProcessAudioFull implements ShouldQueue
 
         } catch (\Throwable $e) {
             Log::error("Error al generar audio: " . $e->getMessage());
-
-            $title = $this->contextInfo['type'] === 'article'
-                ? "Error al generar audio del artículo"
-                : "Error al generar audio de la lección";
-
-            Notification::make()
-                ->title($title)
-                ->body('Ocurrió un error. Por favor, intenta nuevamente.')
-                ->danger()
-                ->sendToDatabase($this->user);
-
             throw $e;
         }
     }
