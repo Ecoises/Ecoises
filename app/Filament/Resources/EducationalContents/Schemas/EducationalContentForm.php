@@ -458,7 +458,7 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                             $contextInfo = [
                                 'type' => 'lesson',
                                 'lesson_title' => $target->title,
-                                'course_title' => $target->educationalContent->title ?? 'Curso',
+                                'educational_resource_title' => $target->educationalContent->title ?? 'Recurso Educativo',
                             ];
                         }
                     }

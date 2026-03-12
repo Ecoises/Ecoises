@@ -73,9 +73,11 @@ class ProcessAudioFull implements ShouldQueue
                 ? "Audio del artículo \"{$this->contextInfo['title']}\" listo"
                 : "Audio de la lección \"{$this->contextInfo['lesson_title']}\" listo";
 
+            $resourceTitle = $this->contextInfo['educational_resource_title'] ?? $this->contextInfo['educational_content_title'] ?? $this->contextInfo['course_title'] ?? '';
+
             $body = $this->contextInfo['type'] === 'article'
                 ? "Ya puedes escuchar la narración de tu artículo."
-                : "La lección del curso \"{$this->contextInfo['educational_content_title']}\" ya tiene su audio.";
+                : "La lección del recurso educativo \"{$resourceTitle}\" ya tiene su audio.";
 
             Notification::make()
                 ->title($title)
