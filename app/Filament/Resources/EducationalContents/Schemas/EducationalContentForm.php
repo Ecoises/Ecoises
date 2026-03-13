@@ -655,14 +655,26 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                         ->rows(3)
                         ->required(),
                         
-                    // Drag Drop
-                    KeyValue::make('content_data.items')
-                        ->label('Relacionar conceptos')
-                        ->keyLabel('Palabra o frase')
-                        ->valueLabel('Pertenece a...')
-                        ->helperText('Crea una lista de elementos. A la izquierda la palabra clave y a la derecha su grupo o descripción.')
+                    // Drag Drop — Categorías
+                    Repeater::make('content_data.categories')
+                        ->label('Categorías')
+                        ->helperText('Crea categorías y asigna palabras o elementos a cada una. El estudiante deberá arrastrar cada elemento a su categoría correcta.')
                         ->visible(fn (Get $get) => $get('activity_type') === 'drag_drop')
-                        ->addActionLabel('Añadir elemento'),
+                        ->schema([
+                            TextInput::make('name')
+                                ->label('Nombre de la categoría')
+                                ->placeholder('Ej: Mamíferos, Reptiles, Aves...')
+                                ->required(),
+                            TagsInput::make('items')
+                                ->label('Elementos de esta categoría')
+                                ->placeholder('Escribe un elemento y presiona Enter')
+                                ->helperText('Añade las palabras o frases que pertenecen a esta categoría.')
+                                ->required(),
+                        ])
+                        ->columns(1)
+                        ->addActionLabel('Añadir categoría')
+                        ->defaultItems(2)
+                        ->reorderableWithButtons(),
                         
                     // Matching
                     Repeater::make('content_data.pairs')

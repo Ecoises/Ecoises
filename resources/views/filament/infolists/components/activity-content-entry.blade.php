@@ -275,47 +275,55 @@
             @else
                 <p class="text-sm text-gray-500 italic">Sin pares definidos</p>
             @endif
-
        @elseif($activityType === 'drag_drop')
-    {{-- Arrastrar y soltar --}}
+    {{-- Arrastrar y soltar: estructura categories [{name, items[]}, ...] --}}
     @php
-        $items = [];
+        $dragCategories = [];
         if (is_array($state)) {
-            // Estructura KeyValue: {"items": {"key": "value"}}
-            if (isset($state['items']) && is_array($state['items'])) {
-                $items = $state['items'];
-            }
-            // Fallback: estructura directa
-            elseif (!isset($state['items'])) {
-                $items = $state;
+            if (isset($state['categories']) && is_array($state['categories'])) {
+                $dragCategories = $state['categories'];
             }
         }
     @endphp
 
-    @if(count($items) > 0)
-        <div class="space-y-2">
-            @foreach($items as $element => $category)
-                <div class="flex items-center gap-3 p-3 rounded-lg bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-700 transition-colors">
-                    <div class="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-primary-500 text-white font-bold shadow-sm">
-                        {{ $loop->iteration }}
+    @if(count($dragCategories) > 0)
+        <div class="space-y-4">
+            @foreach($dragCategories as $cat)
+                @php
+                    $catName  = $cat['name'] ?? 'Sin nombre';
+                    $catItems = $cat['items'] ?? [];
+                @endphp
+                
+                <div class="rounded-lg bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-700 overflow-hidden mb-4">
+                    {{-- Cabecera de la categoría --}}
+                    <div class="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
+                            <span class="text-sm font-bold text-primary-700 dark:text-primary-300">{{ $loop->iteration }}</span>
+                        </div>
+                        <span class="font-medium text-gray-900 dark:text-gray-100">{{ $catName }}</span>
+                        <span class="ml-auto text-xs font-medium text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full">
+                            {{ count($catItems) }} {{ count($catItems) === 1 ? 'elemento' : 'elementos' }}
+                        </span>
                     </div>
-                    
-                    <div class="flex-1 font-medium text-gray-900 dark:text-gray-100">
-                        {{ $element }}
-                    </div>
-                    
-                    <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                    
-                    <div class="flex-shrink-0 px-3 py-1 rounded-full bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 text-sm font-semibold">
-                        {{ $category }}
+
+                    {{-- Elementos de la categoría --}}
+                    <div class="px-4 py-4 flex flex-wrap gap-2">
+                        @forelse($catItems as $item)
+                            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-gray-50 border border-gray-200 dark:bg-gray-800 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300">
+                                <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                                </svg>
+                                {{ $item }}
+                            </div>
+                        @empty
+                            <p class="text-sm text-gray-400 italic py-1">Sin elementos en esta categoría</p>
+                        @endforelse
                     </div>
                 </div>
             @endforeach
         </div>
     @else
-        <p class="text-sm text-gray-500 italic">Sin elementos definidos</p>
+        <p class="text-sm text-gray-500 italic">Sin categorías definidas</p>
     @endif
         @else
             {{-- Formato genérico --}}

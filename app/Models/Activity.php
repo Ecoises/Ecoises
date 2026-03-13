@@ -48,6 +48,7 @@ class Activity extends Model
         'feedback_incorrect',
         'items',
         'pairs',
+        'categories',
     ];
 
     public function activitable(): MorphTo
@@ -118,5 +119,10 @@ class Activity extends Model
     public function getPairsAttribute()
     {
         return $this->content_data['pairs'] ?? null;
+    }
+
+    public function getCategoriesAttribute()
+    {
+        return $this->content_data['categories'] ?? null;
     }
 }
