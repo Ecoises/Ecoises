@@ -7,13 +7,14 @@ use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Api\TaxonController;
 use App\Http\Controllers\Api\ObservationController;
 
-// Rutas de autenticación
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/auth/google', [GoogleController::class, 'authenticate']);
-
-Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
-Route::post('reset-password', [AuthController::class, 'resetPassword']);
+// Rutas de autenticación protegidas por limitador de tasa
+Route::middleware('throttle:login')->group(function () {
+    Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/auth/google', [GoogleController::class, 'authenticate']);
+    Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('reset-password', [AuthController::class, 'resetPassword']);
+});
 
 // Rutas para la gestión de taxones
 Route::prefix('taxa')->group(function () {
