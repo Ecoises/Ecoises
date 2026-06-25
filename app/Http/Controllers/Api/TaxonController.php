@@ -204,12 +204,12 @@ class TaxonController extends Controller
      * @return \Illuminate\Http\JsonResponse
      */
     /**
-     * Lista especies de Colombia o cercanas para exploración (Optimizado)
+     * Lista especies del catálogo local enriquecidas con iNaturalist
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function exploreColombiaSpecies(Request $request)
+    public function explore(Request $request)
     {
         $request->validate([
             'per_page' => 'sometimes|integer|min:1|max:100',
@@ -233,7 +233,6 @@ class TaxonController extends Controller
             'lat', 'lng', 'radius', 'order_by'
         ]);
 
-        // Usar método optimizado iNaturalist-only
         $result = $this->taxonService->getSpeciesNearLocation($params);
 
         if (!$result['success']) {
@@ -245,18 +244,16 @@ class TaxonController extends Controller
             ], $result['error']['code'] ?? 500);
         }
 
-        // OPTIMIZACIÓN: Retornamos data "light" sin enriquecimiento pesado
         $data = $result['data'];
 
         return response()->json([
             'success' => true,
-            'message' => 'Especies obtenidas correctament (iNat Optimized)',
+            'message' => 'Especies locales obtenidas correctamente',
             'data' => $data,
             'meta' => [
-                'source' => $result['source'] ?? 'api',
+                'source' => $result['source'] ?? 'local',
                 'cached' => $result['cached'] ?? false,
                 'pagination' => $result['pagination'] ?? null,
-                'used_location' => $result['used_location'] ?? null,
             ],
         ]);
     }

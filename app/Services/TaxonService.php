@@ -104,143 +104,30 @@ class TaxonService
      */
     public function searchTaxa(string $query, array $filters = []): array
     {
-        // Si la consulta está vacía, buscamos especies populares o todas las especies
-        if (empty(trim($query))) {
-            // Buscar especies populares ordenadas por número de observaciones
-            $apiResult = $this->iNaturalistService->searchTaxon('', array_merge($filters, [
-                'order_by' => 'observations_count',
-                'order' => 'desc',
-                'has' => ['photos'], // Solo especies con fotos
-                'rank' => 'species', // Solo especies (no géneros, familias, etc.)
-                'is_active' => 'true', // Solo especies activas
-                'per_page' => $filters['per_page'] ?? 15,
-                // OPTIMIZACIÓN: No pedir identificaciones
-                'identifications' => 'false', 
-            ]));
-            
-            if (!$apiResult['success']) {
-                Log::error('Error al obtener especies populares', [
-                    'filters' => $filters,
-                    'error' => $apiResult['error'] ?? 'Error desconocido'
-                ]);
-                
-                return [
-                    'success' => false,
-                    'error' => $apiResult['error'] ?? ['message' => 'Error al obtener especies populares'],
-                    'source' => 'api',
-                ];
-            }
-            
-            // Procesar y guardar los resultados
-            $savedTaxa = [];
-            if (isset($apiResult['data']) && is_array($apiResult['data'])) {
-                foreach ($apiResult['data'] as $taxonData) {
-                    $savedTaxon = $this->createOrUpdateTaxonFromApiData($taxonData);
-                    if ($savedTaxon) {
-                        $savedTaxa[] = $savedTaxon;
-                    }
-                }
-            }
-            
-            // Enriquecer con datos unidos
-            // OPTIMIZACIÓN: En la lista solo mandamos default_photo, NO la galería completa
-            $formattedTaxa = collect($savedTaxa)->map(function($taxon) {
-                $data = $taxon->enriched_data;
-                // Eliminamos datos pesados para la lista
-                unset($data['gallery']);
-                unset($data['ancestors']);
-                unset($data['conservation_statuses']);
-                return $data;
-            })->toArray();
-            
-            return [
-                'success' => true,
-                'data' => $formattedTaxa,
-                'pagination' => $apiResult['pagination'] ?? [
-                    'total' => count($formattedTaxa),
-                    'per_page' => $filters['per_page'] ?? 15,
-                    'current_page' => $filters['page'] ?? 1,
-                    'last_page' => 1,
-                ],
-                'cached' => $apiResult['cached'] ?? false,
-                'source' => 'api',
-            ];
+        // Si la consulta está vacía o es 'all', listamos todas las especies locales aplicando filtros
+        if (empty(trim($query)) || $query === 'all') {
+            return $this->getSpeciesNearLocation($filters);
         }
 
-        // Primero intentamos buscar en la base de datos local
+        // Buscamos en la base de datos local
         $localResults = $this->searchLocalTaxa($query, $filters);
         
-        // Si hay resultados locales, los enriquecemos y devolvemos
-        if (!empty($localResults['data'])) {
-            // Enriquecer locales (asumiendo que son Taxa models o paginador)
-            $formattedLocal = collect($localResults['data'])->map(function ($taxon) {
-                return $taxon instanceof Taxa ? $taxon->enriched_data : $taxon;
-            })->toArray();
-            
-            $localResults['data'] = $formattedLocal;  // Actualiza el array
-            $localResults['source'] = 'local';
-            return $localResults;
+        // Enriquecer los resultados locales al vuelo
+        $formattedLocal = [];
+        foreach ($localResults['data'] as $taxon) {
+            if ($taxon instanceof Taxa) {
+                $taxon = $this->ensureTaxonIsEnriched($taxon);
+                $formattedLocal[] = $taxon->enriched_data;
+            } else {
+                $formattedLocal[] = $taxon;
+            }
         }
         
-        // Si no hay resultados locales, buscamos en la API de iNaturalist
-        try {
-            $apiResults = $this->iNaturalistService->searchTaxon($query, $filters);
-            
-            if (!$apiResults['success']) {
-                Log::error('Error al buscar taxones en iNaturalist', [
-                    'query' => $query,
-                    'filters' => $filters,
-                    'error' => $apiResults['error'] ?? 'Error desconocido'
-                ]);
-                
-                return [
-                    'success' => false,
-                    'error' => $apiResults['error'] ?? ['message' => 'Error al buscar taxones en la API'],
-                    'source' => 'api',
-                ];
-            }
-            
-            // Procesamos y guardamos los resultados de la API
-            $savedTaxa = [];
-            
-            if (isset($apiResults['data']) && is_array($apiResults['data'])) {
-                foreach ($apiResults['data'] as $taxonData) {
-                    $savedTaxon = $this->createOrUpdateTaxonFromApiData($taxonData);
-                    if ($savedTaxon) {
-                        $savedTaxa[] = $savedTaxon;
-                    }
-                }
-            }
-            
-            // Enriquecer con datos unidos
-            $formattedTaxa = collect($savedTaxa)->map->enriched_data->toArray();
-            
-            return [
-                'success' => true,
-                'data' => $formattedTaxa,
-                'pagination' => $apiResults['pagination'] ?? [
-                    'total' => count($formattedTaxa),
-                    'per_page' => $filters['per_page'] ?? 15,
-                    'current_page' => $filters['page'] ?? 1,
-                    'last_page' => 1,
-                ],
-                'cached' => $apiResults['cached'] ?? false,
-                'source' => 'api',
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error('Excepción al buscar taxones: ' . $e->getMessage(), [
-                'query' => $query,
-                'filters' => $filters,
-                'trace' => $e->getTraceAsString()
-            ]);
-            
-            return [
-                'success' => false,
-                'error' => ['message' => 'Error inesperado al buscar taxones: ' . $e->getMessage()],
-                'source' => 'api',
-            ];
-        }
+        $localResults['data'] = $formattedLocal;
+        $localResults['source'] = 'local_enriched_search';
+        $localResults['cached'] = true;
+
+        return $localResults;
     }
     
     /**
@@ -446,7 +333,7 @@ class TaxonService
     }
     
     /**
-     * Obtiene observaciones de un taxón específico
+     * Obtiene observaciones de un taxón específico desde la BD local.
      *
      * @param int $taxonId
      * @param array $params
@@ -454,33 +341,36 @@ class TaxonService
      */
     public function getTaxonObservations(int $taxonId, array $params = []): array
     {
-        // Primero obtenemos el taxón para asegurarnos de que existe
-        $taxonResult = $this->getTaxonById($taxonId);
-        
-        if (!$taxonResult['success']) {
-            return $taxonResult;
-        }
-        
-        // Obtenemos las observaciones de la API
-        $apiResult = $this->iNaturalistService->getTaxonObservations($taxonId, $params);
-        
-        if (!$apiResult['success']) {
+        // Verificar que el taxón existe localmente
+        $taxon = Taxa::find($taxonId);
+        if (! $taxon) {
             return [
                 'success' => false,
-                'error' => $apiResult['error'] ?? ['message' => 'Error al obtener las observaciones del taxón'],
-                'source' => 'api',
+                'error'   => ['message' => 'Taxón no encontrado', 'code' => 404],
             ];
         }
-        
-        // Aquí podríamos procesar y guardar las observaciones en la base de datos local
-        // si fuera necesario para nuestra aplicación
-        
+
+        $perPage = $params['per_page'] ?? 15;
+        $page    = $params['page'] ?? 1;
+
+        $query = Observation::with(['user:id,name,avatar', 'photos'])
+            ->where('taxon_id', $taxonId)
+            ->where('is_public', true)
+            ->orderByDesc('observed_at');
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
         return [
-            'success' => true,
-            'data' => $apiResult['data'],
-            'pagination' => $apiResult['pagination'] ?? [],
-            'cached' => $apiResult['cached'] ?? false,
-            'source' => 'api',
+            'success'    => true,
+            'data'       => $paginator->items(),
+            'pagination' => [
+                'total'        => $paginator->total(),
+                'per_page'     => $paginator->perPage(),
+                'current_page' => $paginator->currentPage(),
+                'last_page'    => $paginator->lastPage(),
+            ],
+            'cached' => false,
+            'source' => 'local',
         ];
     }
     
@@ -1253,6 +1143,140 @@ public function mapEstablishmentMeans(?string $status): array
         
         return $observation;
     }
+
+    /**
+     * Asegura que un taxón local esté enriquecido con los datos completos de iNaturalist
+     *
+     * @param Taxa $taxon
+     * @return Taxa
+     */
+    public function ensureTaxonIsEnriched(Taxa $taxon): Taxa
+    {
+        $ref = $taxon->apiReferences->firstWhere('api_source', 'inaturalist');
+        
+        // Si no tiene referencia o la referencia no tiene la data de iNaturalist poblada
+        if (!$ref || empty($ref->data)) {
+            $externalId = $ref ? $ref->external_id : null;
+            
+            // Si no tiene external_id, lo buscamos en iNaturalist usando su nombre científico
+            if (!$externalId) {
+                Log::info("🔍 Buscando external_id en iNaturalist para: {$taxon->scientific_name}");
+                $searchResponse = $this->iNaturalistService->searchTaxon($taxon->scientific_name, ['per_page' => 1]);
+                if ($searchResponse['success'] && !empty($searchResponse['data'])) {
+                    $apiData = $searchResponse['data'][0];
+                    $externalId = $apiData['id'];
+                }
+            }
+
+            if ($externalId) {
+                Log::info("🌍 Enriqueciendo taxón local #{$taxon->id} con iNaturalist ID: {$externalId}");
+                $apiResult = $this->iNaturalistService->getTaxonById($externalId);
+                if ($apiResult['success'] && !empty($apiResult['data'])) {
+                    $updatedTaxon = $this->createOrUpdateTaxonFromApiData($apiResult['data']);
+                    if ($updatedTaxon) {
+                        return $updatedTaxon;
+                    }
+                }
+            }
+        }
+        
+        return $taxon;
+    }
+
+    /**
+     * Obtiene especies locales enriquecidas con iNaturalist
+     * Optimizada para retornar el catálogo local aplicando filtros del frontend.
+     */
+    public function getSpeciesNearLocation(array $filters = []): array
+    {
+        try {
+            Log::info('🔍 Filtros locales recibidos en getSpeciesNearLocation', $filters);
+
+            // 1. Extraer Params
+            $perPage = (int)($filters['per_page'] ?? 24);
+            $page = (int)($filters['page'] ?? 1);
+            $orderBy = $filters['order_by'] ?? 'observations_count';
+            $q = $filters['q'] ?? null;
+
+            // 2. Consulta base sobre el catálogo local de taxa
+            $query = Taxa::with(['apiReferences']);
+
+            // Filtro por término de búsqueda (q)
+            if (!empty($q)) {
+                $query->where(function($qBuilder) use ($q) {
+                    $qBuilder->where('scientific_name', 'like', "%{$q}%")
+                             ->orWhere('common_name', 'like', "%{$q}%");
+                });
+            }
+
+            // Filtro por grupo icónico (iconic_taxa)
+            if (!empty($filters['iconic_taxa'])) {
+                $iconic = $filters['iconic_taxa'];
+                $query->where(function($qBuilder) use ($iconic) {
+                    $qBuilder->where('class', $iconic)
+                             ->orWhere('phylum', $iconic)
+                             ->orWhere('kingdom', $iconic);
+                });
+            }
+
+            // Filtro por nativas/endémicas
+            if (isset($filters['native']) && $filters['native'] === true) {
+                $query->where('is_native', true);
+            }
+            if (isset($filters['endemic']) && $filters['endemic'] === true) {
+                $query->where('is_endemic', true);
+            }
+
+            // Filtro por amenazadas (threatened)
+            if (isset($filters['threatened']) && $filters['threatened'] === true) {
+                $query->whereIn('conservation_status', ['VU', 'EN', 'CR', 'EW', 'EX']);
+            }
+
+            // Ordenamiento
+            if ($orderBy === 'random') {
+                $query->inRandomOrder();
+            } elseif ($orderBy === 'observed_on' || $orderBy === 'last_observed_at') {
+                $query->orderByDesc('last_observed_at');
+            } else {
+                $query->orderByDesc('observation_count');
+            }
+
+            // Paginación
+            $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+            $taxa = $paginator->items();
+            $formattedTaxa = [];
+
+            // 3. Enriquecimiento al vuelo e inserción de datos iNaturalist en BD local si no existen
+            foreach ($taxa as $taxon) {
+                $taxon = $this->ensureTaxonIsEnriched($taxon);
+                $formattedTaxa[] = $taxon->enriched_data;
+            }
+
+            return [
+                'success' => true,
+                'data' => $formattedTaxa,
+                'pagination' => [
+                    'total' => $paginator->total(),
+                    'per_page' => $paginator->perPage(),
+                    'current_page' => $paginator->currentPage(),
+                    'last_page' => $paginator->lastPage(),
+                    'from' => $paginator->firstItem(),
+                    'to' => $paginator->lastItem(),
+                ],
+                'source' => 'local_enriched_hybrid',
+                'cached' => true
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('Error en getSpeciesNearLocation local: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return [
+                'success' => false,
+                'error' => ['message' => 'Error al obtener la lista local de especies: ' . $e->getMessage()]
+            ];
+        }
+    }
     
     /**
      * Obtiene especies de Colombia para exploración
@@ -1263,148 +1287,6 @@ public function mapEstablishmentMeans(?string $status): array
      */
 
     /**
-     * Obtiene especies cercanas o de Colombia (Solo iNaturalist)
-     * Optimizada para rendimiento y ubicación dinámica.
-     * MIGRACIÓN: Reemplaza a getColombiaSpecies para el explorador principal.
-     */
-     public function getSpeciesNearLocation(array $filters = []): array
-     {
-         Log::info('🔍 Params received in getSpeciesNearLocation', $filters); // Debug log
-
-         // 1. Extraer Params
-         $lat = !empty($filters['lat']) ? (float)$filters['lat'] : null;
-         $lng = !empty($filters['lng']) ? (float)$filters['lng'] : null;
-         $radius = !empty($filters['radius']) ? (float)$filters['radius'] : 50;
-
-         Log::info('🔍 Filtros recibidos en getSpeciesNearLocation', $filters); // Debugging Log
-
-        $perPage = (int)($filters['per_page'] ?? 24);
-        $page = (int)($filters['page'] ?? 1);
-        $orderBy = $filters['order_by'] ?? 'observations_count';
-        // Force observation_count if sorting by observed_on/random for species_counts endpoint limitation
-        // (Random is handled manually post-fetch)
-        $apiOrder = ($orderBy === 'random' || $orderBy === 'observed_on') ? 'observations_count' : $orderBy;
-        $order = $filters['order'] ?? 'desc';
-
-        // 2. Construir params iNat
-        $inatParams = [
-            'per_page' => $perPage,
-            'page' => $page,
-            'verifiable' => 'true',
-            'quality_grade' => 'research',
-            'photos' => 'true',
-            'hrank' => 'species',
-            'lrank' => 'species',
-            'order_by' => $apiOrder, 
-            'order' => $order,
-        ];
-        
-        // Filtros adicionales
-        if (!empty($filters['native']) && $filters['native'] !== 'all') $inatParams['native'] = 'true';
-        if (!empty($filters['endemic']) && $filters['endemic'] !== 'all') $inatParams['endemic'] = 'true';
-        if (!empty($filters['threatened']) && $filters['threatened'] !== 'all') $inatParams['threatened'] = 'true';
-        
-        
-        // Soporte para filtro por grupo icónico
-        // El endpoint /observations/species_counts SÍ acepta iconic_taxa[]
-        if (!empty($filters['iconic_taxa'])) {
-            $iconic = is_array($filters['iconic_taxa'])
-                ? $filters['iconic_taxa']
-                : explode(',', $filters['iconic_taxa']);
-
-            $inatParams['iconic_taxa'] = $iconic;
-            Log::info('Aplicando filtro iconic_taxa', ['valores' => $iconic]);
-        }
-        
-        // Soporte directo para taxon_id (sobrescribe iconic_taxa si ambos están presentes)
-        if (!empty($filters['taxon_id'])) {
-             $inatParams['taxon_id'] = $filters['taxon_id'];
-        }
-
-        // Lógica de Ubicación
-        if ($lat && $lng) {
-            $inatParams['lat'] = $lat;
-            $inatParams['lng'] = $lng;
-            $inatParams['radius'] = $radius;
-            $inatParams['place_id'] = null; // Desactivar fallback Colombia
-        } else {
-            // Fallback Colombia
-            $inatParams['place_id'] = 7196;
-            $inatParams['preferred_place_id'] = 7196; // Para status
-        }
-        
-        // Log final params antes de llamar API
-        Log::info('📤 Parámetros finales para iNaturalist API', [
-            'inatParams' => $inatParams,
-            'has_taxon_id' => isset($inatParams['taxon_id']),
-            'taxon_id_value' => $inatParams['taxon_id'] ?? 'N/A'
-        ]);
-
-        // 3. Caché Diferenciado
-        $latKey = $lat ? round($lat, 4) : 'CO';
-        $lngKey = $lng ? round($lng, 4) : 'CO';
-        $radKey = $lat ? $radius : 'def';
-        
-        // Hash de filtros
-        $filterStr = http_build_query(Arr::except($inatParams, ['lat', 'lng', 'radius', 'page', 'per_page']));
-        $cacheKey = "species_expl_v4_{$latKey}_{$lngKey}_{$radKey}_{$page}_{$perPage}_" . md5($filterStr);
-
-        $ttl = ($lat && $lng) ? 600 : 3600;
-
-        $result = Cache::remember($cacheKey, now()->addSeconds($ttl), function() use ($inatParams) {
-             // A. Obtener lista básica (counts)
-             $result = $this->iNaturalistService->getSpeciesCounts($inatParams);
-             
-             if (!$result['success'] || empty($result['data'])) return $result;
-
-             // B. ENRIQUECIMIENTO (Batch /taxa) y LOCALIZACIÓN DE IDs
-             $items = collect($result['data']);
-             $ids = $items->pluck('id')->toArray();
-             
-             if (!empty($ids)) {
-                 $enrichedResponse = $this->iNaturalistService->getTaxaByIds($ids);
-                 $enrichedMap = $enrichedResponse['success'] ? collect($enrichedResponse['data'])->keyBy('id') : collect();
-                 
-                 // PRE-LAVADO DE IDs (Solo lectura rápida)
-                 // Solo mapeamos si YA EXISTE. No creamos nada aquí para no ralentizar.
-                 $existingRefs = \App\Models\TaxonApiReference::whereIn('external_id', $ids)
-                    ->where('api_source', 'inaturalist')
-                    ->pluck('taxon_id', 'external_id');
-                 
-                 // Procesar lista
-                 $result['data'] = $items->map(function($item) use ($enrichedMap, $existingRefs) {
-                     $externalId = $item['id'];
-                     
-                     // 1. Aplicar enriquecimiento de datos
-                     if ($rich = $enrichedMap->get($externalId)) {
-                         $item['establishment_status_colombia'] = $rich['establishment_status_colombia'] ?? $item['establishment_status_colombia'];
-                         $item['native'] = $rich['native'];
-                         $item['endemic'] = $rich['endemic'];
-                         $item['introduced'] = $rich['introduced'];
-                         $item['conservation_status'] = $rich['conservation_status'] ?? $item['conservation_status'];
-                         $item['scientific_name'] = $rich['scientific_name'] ?? $item['scientific_name'];
-                     }
-                     
-                     // 2. RESOLUCIÓN DE ID (Solo si ya existe)
-                     if (isset($existingRefs[$externalId])) {
-                         $item['id'] = $existingRefs[$externalId];
-                     } 
-                     // Si no existe, dejamos el ID externo.
-                     // El backend en show() se encargará de resolverlo on-demand.
-                     
-                     return $item;
-                 })->toArray();
-             }
-             
-             $result['source'] = 'inat_optimized_enriched_localized_read_only';
-             $result['used_location'] = isset($inatParams['lat']) ? 'coords' : 'place_id';
-             
-             return $result;
-        });
-
-        // 4. Post-procesamiento NO CACHEADO (Random Sort)
-        if ($orderBy === 'random' && !empty($result['data'])) {
-             shuffle($result['data']);
         }
         
         return $result;

@@ -18,11 +18,12 @@ Route::middleware('throttle:login')->group(function () {
 
 // Rutas para la gestión de taxones
 Route::prefix('taxa')->group(function () {
-    Route::get('/', [TaxonController::class, 'index']); // Listar todos los taxones
-    Route::get('/search', [TaxonController::class, 'search']); // Buscar taxones
-    Route::get('/explore/colombia', [TaxonController::class, 'exploreColombiaSpecies']); // Explorar especies de Colombia
-    Route::get('/{id}/related', [TaxonController::class, 'related']); // Especies relacionadas (debe ir antes de /{id})
-    Route::get('/{id}', [TaxonController::class, 'show']); // Obtener un taxón por ID
+    Route::get('/', [TaxonController::class, 'index']);                          // Listar todos los taxones
+    Route::get('/search', [TaxonController::class, 'search']);                   // Buscar taxones
+    Route::get('/explore', [TaxonController::class, 'explore']);                 // Explorar catálogo local enriquecido
+    Route::get('/{id}/related', [TaxonController::class, 'related']);            // Especies relacionadas (antes de /{id})
+    Route::get('/{id}/observations', [TaxonController::class, 'observations']);  // Avistamientos locales del taxón
+    Route::get('/{id}', [TaxonController::class, 'show']);                       // Obtener un taxón por ID
 });
 
 // Rutas de Contenido Educativo
@@ -44,8 +45,10 @@ use App\Http\Controllers\Api\DailySpeciesController;
 Route::get('/daily-curiosities', [DailySpeciesController::class, 'index']);
 Route::get('/daily-recommendation', [DailySpeciesController::class, 'speciesOfTheDay']);
 
-
-
+// ── Avistamientos / Observaciones ────────────────────────────────────────────
+// Lectura pública
+Route::get('/observations', [ObservationController::class, 'index']);
+Route::get('/observations/{id}', [ObservationController::class, 'show']);
 
 // Rutas protegidas (requieren autenticación)
 Route::middleware('auth:sanctum')->group(function () {
@@ -53,5 +56,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profile', [AuthController::class, 'profile']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    
+    // Registrar un nuevo avistamiento
+    Route::post('/observations', [ObservationController::class, 'store']);
 });

@@ -19,21 +19,14 @@ class Observation extends Model
     protected $fillable = [
         'user_id',
         'taxon_id',
-        'location_id',
         'latitude',
         'longitude',
-        'location_accuracy',
-        'location_description',
+        'location_name',
         'observed_at',
         'description',
         'notes',
-        'identification_status',
-        'confidence_level',
-        'quality_score',
-        'points_awarded',
-        'is_featured',
         'is_public',
-        'is_research_grade',
+        'points_awarded',
     ];
 
     /**
@@ -43,12 +36,12 @@ class Observation extends Model
      */
     protected $casts = [
         'observed_at' => 'datetime',
-        'is_featured' => 'boolean',
-        'is_public' => 'boolean',
-        'is_research_grade' => 'boolean',
+        'is_public'   => 'boolean',
+        'latitude'    => 'float',
+        'longitude'   => 'float',
     ];
 
-    // Relaciones
+    // ── Relaciones ───────────────────────────────────────────────────────
 
     public function user(): BelongsTo
     {
@@ -57,24 +50,19 @@ class Observation extends Model
 
     public function taxon(): BelongsTo
     {
-        return $this->belongsTo(Taxa::class);
+        return $this->belongsTo(Taxa::class, 'taxon_id');
     }
 
     public function photos(): HasMany
     {
         return $this->hasMany(ObservationPhoto::class);
     }
-    
-    public function identifications(): HasMany
-    {
-        return $this->hasMany(Identification::class);
-    }
-    
+
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class);
     }
-    
+
     public function likes(): HasMany
     {
         return $this->hasMany(ObservationLike::class);

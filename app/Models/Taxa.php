@@ -32,6 +32,11 @@ class Taxa extends Model
         'is_endemic',
         'observation_count',
         'last_observed_at',
+        // Trazabilidad local del inventario
+        'taxon_author',
+        'inventory_author',
+        'local_records_count',
+        'attribution',
     ];
     
     /**
@@ -95,6 +100,12 @@ class Taxa extends Model
         $enriched['is_endemic'] = $establishmentData['is_endemic'];
         $enriched['establishment_status_colombia'] = $establishmentData['status'];  // Para frontend
     }
+
+    // Asegurar que los campos locales de trazabilidad siempre estén presentes
+    $enriched['taxon_author']        = $enriched['taxon_author'] ?? null;
+    $enriched['inventory_author']    = $enriched['inventory_author'] ?? null;
+    $enriched['local_records_count'] = $enriched['local_records_count'] ?? 0;
+    $enriched['attribution']         = $enriched['attribution'] ?? null;
 
     return $enriched;
 }
