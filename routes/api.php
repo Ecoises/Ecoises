@@ -56,6 +56,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profile', [AuthController::class, 'profile']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    // Registrar un nuevo avistamiento
+    // Registrar, actualizar, eliminar y reportar avistamientos
     Route::post('/observations', [ObservationController::class, 'store']);
+    Route::post('/observations/{id}', [ObservationController::class, 'update']);
+    Route::delete('/observations/{id}', [ObservationController::class, 'destroy']);
+    Route::post('/observations/{id}/report', [ObservationController::class, 'report']);
 });

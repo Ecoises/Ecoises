@@ -67,4 +67,9 @@ class Observation extends Model
     {
         return $this->hasMany(ObservationLike::class);
     }
+
+    public function reports(): HasMany
+    {
+        return $this->hasMany(Report::class);
+    }
 }

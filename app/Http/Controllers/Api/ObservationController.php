@@ -174,4 +174,215 @@ class ObservationController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Actualizar una observación existente.
+     * Requiere que el usuario sea el propietario.
+     */
+    public function update(Request $request, int $id)
+    {
+        $observation = Observation::find($id);
+
+        if (!$observation) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Observación no encontrada.',
+            ], 404);
+        }
+
+        if ($observation->user_id !== $request->user()->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No estás autorizado para editar esta observación.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'taxon_id'      => 'nullable|integer|exists:taxa,id',
+            'latitude'      => 'nullable|numeric|between:-90,90',
+            'longitude'     => 'nullable|numeric|between:-180,180',
+            'location_name' => 'nullable|string|max:255',
+            'observed_at'   => 'nullable|date',
+            'description'   => 'nullable|string|max:2000',
+            'notes'         => 'nullable|string|max:1000',
+            'is_public'     => 'sometimes|boolean',
+            'photos'        => 'nullable|array|max:5',
+            'photos.*'      => 'image|mimes:jpeg,png,jpg,webp|max:8192',
+            'delete_photos' => 'nullable|array',
+            'delete_photos.*' => 'integer',
+        ]);
+
+        try {
+            // Actualizar datos básicos
+            $observation->update([
+                'taxon_id'      => array_key_exists('taxon_id', $validated) ? $validated['taxon_id'] : $observation->taxon_id,
+                'latitude'      => array_key_exists('latitude', $validated) ? $validated['latitude'] : $observation->latitude,
+                'longitude'     => array_key_exists('longitude', $validated) ? $validated['longitude'] : $observation->longitude,
+                'location_name' => array_key_exists('location_name', $validated) ? $validated['location_name'] : $observation->location_name,
+                'observed_at'   => array_key_exists('observed_at', $validated) ? $validated['observed_at'] : $observation->observed_at,
+                'description'   => array_key_exists('description', $validated) ? $validated['description'] : $observation->description,
+                'notes'         => array_key_exists('notes', $validated) ? $validated['notes'] : $observation->notes,
+                'is_public'     => isset($validated['is_public']) ? (bool)$validated['is_public'] : $observation->is_public,
+            ]);
+
+            // Eliminar fotos si se solicitó
+            if (!empty($validated['delete_photos'])) {
+                $photosToDelete = ObservationPhoto::where('observation_id', $observation->id)
+                    ->whereIn('id', $validated['delete_photos'])
+                    ->get();
+
+                foreach ($photosToDelete as $photo) {
+                    $relativeUrl = str_replace('/storage/', '', $photo->photo_url);
+                    if (Storage::disk('public')->exists($relativeUrl)) {
+                        Storage::disk('public')->delete($relativeUrl);
+                    }
+                    $photo->delete();
+                }
+            }
+
+            // Procesar nuevas fotos adjuntas
+            if ($request->hasFile('photos')) {
+                $currentCount = $observation->photos()->count();
+                foreach ($request->file('photos') as $index => $photo) {
+                    if ($currentCount >= 5) break;
+
+                    $path = $photo->store('observations', 'public');
+                    ObservationPhoto::create([
+                        'observation_id' => $observation->id,
+                        'photo_url'      => Storage::url($path),
+                        'is_primary'     => $currentCount === 0 && $index === 0,
+                        'caption'        => null,
+                    ]);
+                    $currentCount++;
+                }
+            }
+
+            // Asegurarse de que haya una foto primaria
+            $hasPrimary = $observation->photos()->where('is_primary', true)->exists();
+            if (!$hasPrimary && $observation->photos()->exists()) {
+                $observation->photos()->first()->update(['is_primary' => true]);
+            }
+
+            $observation->load(['user:id,full_name,avatar', 'taxon:id,scientific_name,common_name', 'photos']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Observación actualizada correctamente.',
+                'data'    => $observation,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error al actualizar observación: ' . $e->getMessage(), [
+                'user_id' => $request->user()->id,
+                'trace'   => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error interno al actualizar la observación.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Eliminar una observación.
+     * Requiere que el usuario sea el propietario.
+     */
+    public function destroy(Request $request, int $id)
+    {
+        $observation = Observation::find($id);
+
+        if (!$observation) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Observación no encontrada.',
+            ], 404);
+        }
+
+        if ($observation->user_id !== $request->user()->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No estás autorizado para eliminar esta observación.',
+            ], 403);
+        }
+
+        try {
+            foreach ($observation->photos as $photo) {
+                $relativeUrl = str_replace('/storage/', '', $photo->photo_url);
+                if (Storage::disk('public')->exists($relativeUrl)) {
+                    Storage::disk('public')->delete($relativeUrl);
+                }
+                $photo->delete();
+            }
+
+            $observation->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Observación eliminada correctamente.',
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error al eliminar observación: ' . $e->getMessage(), [
+                'user_id' => $request->user()->id,
+                'trace'   => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error interno al eliminar la observación.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Reportar una observación por datos incorrectos, etc.
+     */
+    public function report(Request $request, int $id)
+    {
+        $observation = Observation::find($id);
+
+        if (!$observation) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Observación no encontrada.',
+            ], 404);
+        }
+
+        if ($observation->user_id === $request->user()->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No puedes reportar tu propia observación.',
+            ], 400);
+        }
+
+        $validated = $request->validate([
+            'comment' => 'required|string|max:1000',
+        ]);
+
+        try {
+            $report = \App\Models\Report::create([
+                'user_id'        => $request->user()->id,
+                'observation_id' => $observation->id,
+                'comment'        => $validated['comment'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'El reporte ha sido registrado correctamente.',
+                'data'    => $report,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error al reportar observación: ' . $e->getMessage(), [
+                'user_id' => $request->user()->id,
+                'trace'   => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error interno al procesar el reporte.',
+            ], 500);
+        }
+    }
 }
