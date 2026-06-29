@@ -33,7 +33,7 @@ class ObservationController extends Controller
 
         $perPage = $request->integer('per_page', 15);
 
-        $query = Observation::with(['user:id,name,avatar', 'taxon:id,scientific_name,common_name', 'photos'])
+        $query = Observation::with(['user:id,full_name,avatar', 'taxon:id,scientific_name,common_name', 'photos'])
             ->where('is_public', true)
             ->orderByDesc('observed_at');
 
@@ -68,10 +68,10 @@ class ObservationController extends Controller
     public function show(int $id)
     {
         $observation = Observation::with([
-            'user:id,name,avatar',
+            'user:id,full_name,avatar',
             'taxon:id,scientific_name,common_name,conservation_status',
             'photos',
-            'comments.user:id,name,avatar',
+            'comments.user:id,full_name,avatar',
         ])->find($id);
 
         if (! $observation) {

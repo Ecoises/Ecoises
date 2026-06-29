@@ -19,6 +19,8 @@ class User extends Authenticatable implements HasName
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable, hasApiTokens, CanResetPasswordTrait, HasRoles;
 
+    protected $appends = ['name'];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -97,6 +99,11 @@ class User extends Authenticatable implements HasName
         // El operador ?? 'Usuario' asegura que siempre devuelva un string
         // en caso de que 'full_name' esté nulo en algún registro.
         return $this->full_name ?? $this->email;
+    }
+
+    public function getNameAttribute(): ?string
+    {
+        return $this->full_name;
     }
 
     // New/Updated Relations for CTI
