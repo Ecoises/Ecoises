@@ -1,0 +1,14 @@
+ID,Nombre,Guard
+1,ViewAny:EducationalContent,web
+2,View:EducationalContent,web
+3,Create:EducationalContent,web
+4,Update:EducationalContent,web
+5,Delete:EducationalContent,web
+6,ViewAny:ContentCategory,web
+7,View:ContentCategory,web
+8,Create:ContentCategory,web
+9,Update:ContentCategory,web
+10,Delete:ContentCategory,web
+11,View:PublishedContentsWidget,web
+12,View:TotalContentsWidget,web
+13,View:TotalViewsWidget,web

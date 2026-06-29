@@ -1,0 +1,180 @@
+{
+    "timestamp": "2026-06-29T17:46:11+00:00",
+    "permissions": [
+        {
+            "id": 1,
+            "name": "ViewAny:EducationalContent",
+            "guard_name": "web"
+        },
+        {
+            "id": 2,
+            "name": "View:EducationalContent",
+            "guard_name": "web"
+        },
+        {
+            "id": 3,
+            "name": "Create:EducationalContent",
+            "guard_name": "web"
+        },
+        {
+            "id": 4,
+            "name": "Update:EducationalContent",
+            "guard_name": "web"
+        },
+        {
+            "id": 5,
+            "name": "Delete:EducationalContent",
+            "guard_name": "web"
+        },
+        {
+            "id": 6,
+            "name": "ViewAny:ContentCategory",
+            "guard_name": "web"
+        },
+        {
+            "id": 7,
+            "name": "View:ContentCategory",
+            "guard_name": "web"
+        },
+        {
+            "id": 8,
+            "name": "Create:ContentCategory",
+            "guard_name": "web"
+        },
+        {
+            "id": 9,
+            "name": "Update:ContentCategory",
+            "guard_name": "web"
+        },
+        {
+            "id": 10,
+            "name": "Delete:ContentCategory",
+            "guard_name": "web"
+        },
+        {
+            "id": 11,
+            "name": "View:PublishedContentsWidget",
+            "guard_name": "web"
+        },
+        {
+            "id": 12,
+            "name": "View:TotalContentsWidget",
+            "guard_name": "web"
+        },
+        {
+            "id": 13,
+            "name": "View:TotalViewsWidget",
+            "guard_name": "web"
+        }
+    ],
+    "roles": [
+        {
+            "id": 1,
+            "name": "super_admin",
+            "guard_name": "web",
+            "permissions": []
+        },
+        {
+            "id": 2,
+            "name": "educador",
+            "guard_name": "web",
+            "permissions": [
+                {
+                    "id": 1,
+                    "name": "ViewAny:EducationalContent"
+                },
+                {
+                    "id": 2,
+                    "name": "View:EducationalContent"
+                },
+                {
+                    "id": 3,
+                    "name": "Create:EducationalContent"
+                },
+                {
+                    "id": 4,
+                    "name": "Update:EducationalContent"
+                },
+                {
+                    "id": 5,
+                    "name": "Delete:EducationalContent"
+                },
+                {
+                    "id": 8,
+                    "name": "Create:ContentCategory"
+                },
+                {
+                    "id": 11,
+                    "name": "View:PublishedContentsWidget"
+                },
+                {
+                    "id": 12,
+                    "name": "View:TotalContentsWidget"
+                },
+                {
+                    "id": 13,
+                    "name": "View:TotalViewsWidget"
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "name": "editor",
+            "guard_name": "web",
+            "permissions": [
+                {
+                    "id": 1,
+                    "name": "ViewAny:EducationalContent"
+                },
+                {
+                    "id": 2,
+                    "name": "View:EducationalContent"
+                },
+                {
+                    "id": 3,
+                    "name": "Create:EducationalContent"
+                },
+                {
+                    "id": 4,
+                    "name": "Update:EducationalContent"
+                },
+                {
+                    "id": 5,
+                    "name": "Delete:EducationalContent"
+                },
+                {
+                    "id": 6,
+                    "name": "ViewAny:ContentCategory"
+                },
+                {
+                    "id": 7,
+                    "name": "View:ContentCategory"
+                },
+                {
+                    "id": 8,
+                    "name": "Create:ContentCategory"
+                },
+                {
+                    "id": 9,
+                    "name": "Update:ContentCategory"
+                },
+                {
+                    "id": 10,
+                    "name": "Delete:ContentCategory"
+                },
+                {
+                    "id": 11,
+                    "name": "View:PublishedContentsWidget"
+                },
+                {
+                    "id": 12,
+                    "name": "View:TotalContentsWidget"
+                },
+                {
+                    "id": 13,
+                    "name": "View:TotalViewsWidget"
+                }
+            ]
+        }
+    ]
+}

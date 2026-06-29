@@ -22,8 +22,10 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             RoleSeeder::class,
+            UserSeeder::class,
             ApiConfigurationSeeder::class,
             UNALLaPazCatalogSeeder::class,
+            ExportRolesPermissionsSeeder::class,
         ]);
 
     }

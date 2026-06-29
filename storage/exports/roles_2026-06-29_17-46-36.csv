@@ -1,0 +1,24 @@
+"Rol ID","Nombre Rol",Guard,"Permiso ID","Nombre Permiso"
+1,super_admin,web,,
+2,educador,web,1,ViewAny:EducationalContent
+2,educador,web,2,View:EducationalContent
+2,educador,web,3,Create:EducationalContent
+2,educador,web,4,Update:EducationalContent
+2,educador,web,5,Delete:EducationalContent
+2,educador,web,8,Create:ContentCategory
+2,educador,web,11,View:PublishedContentsWidget
+2,educador,web,12,View:TotalContentsWidget
+2,educador,web,13,View:TotalViewsWidget
+3,editor,web,1,ViewAny:EducationalContent
+3,editor,web,2,View:EducationalContent
+3,editor,web,3,Create:EducationalContent
+3,editor,web,4,Update:EducationalContent
+3,editor,web,5,Delete:EducationalContent
+3,editor,web,6,ViewAny:ContentCategory
+3,editor,web,7,View:ContentCategory
+3,editor,web,8,Create:ContentCategory
+3,editor,web,9,Update:ContentCategory
+3,editor,web,10,Delete:ContentCategory
+3,editor,web,11,View:PublishedContentsWidget
+3,editor,web,12,View:TotalContentsWidget
+3,editor,web,13,View:TotalViewsWidget
