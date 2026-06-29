@@ -106,6 +106,7 @@ class Taxa extends Model
     $enriched['inventory_author']    = $enriched['inventory_author'] ?? null;
     $enriched['local_records_count'] = $enriched['local_records_count'] ?? 0;
     $enriched['attribution']         = $enriched['attribution'] ?? null;
+    $enriched['inaturalist_id']      = $ref && is_numeric($ref->external_id) ? (int)$ref->external_id : ($ref->external_id ?? null);
 
     return $enriched;
 }
