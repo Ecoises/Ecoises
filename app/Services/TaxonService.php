@@ -353,7 +353,7 @@ class TaxonService
         $perPage = $params['per_page'] ?? 15;
         $page    = $params['page'] ?? 1;
 
-        $query = Observation::with(['user:id,name,avatar', 'photos'])
+        $query = Observation::with(['user:id,full_name,avatar', 'photos'])
             ->where('taxon_id', $taxonId)
             ->where('is_public', true)
             ->orderByDesc('observed_at');
@@ -671,21 +671,9 @@ class TaxonService
             $taxon->genus = $ancestry['genus'] ?? null;
             $taxon->species = $ancestry['species'] ?? null;
 
-            // Fetch status específico (place_id configurado)
-            // OPTIMIZACIÓN: Usar datos ya presentes en $taxonData para evitar N+1
-            $colombiaStatus = $taxonData['preferred_establishment_means'] 
-                ?? $taxonData['establishment_means'] 
-                ?? null;
-                
-            // Si el status es un array (caso raro en data normalizada pero posible en raw), intentar extraer
-            if (is_array($colombiaStatus)) {
-                $colombiaStatus = $colombiaStatus['establishment_means'] ?? $colombiaStatus[0]['establishment_means'] ?? null;
-            }
-
-            // Fallback: Solo llamar a getEstablishmentStatus si es CRÍTICO y no tenemos data (evitar en bucles)
-            // $colombiaStatus = $colombiaStatus ?? $this->getEstablishmentStatus($taxonData['id'] ?? null);
-
-            $flags = $this->mapEstablishmentMeans($colombiaStatus);
+            // Determinar status de establecimiento usando el extractor robusto
+            // (incluye preferred_establishment_means, establishment_means, listed_taxa y flags booleanos)
+            $flags = $this->extractEstablishmentStatusFromApiData($taxonData);
             $taxon->is_native = $flags['is_native'];
             $taxon->is_endemic = $flags['is_endemic'];
 
@@ -1178,8 +1166,19 @@ public function mapEstablishmentMeans(?string $status): array
                     }
                 }
             }
+
+            return $taxon;
         }
-        
+
+        // Si ya tenemos datos de API cacheados, también debemos persistirlos en la tabla local
+        // para mantener actualizados los campos `conservation_status`, `is_native` y `is_endemic`.
+        if (!empty($ref->data)) {
+            $updatedTaxon = $this->createOrUpdateTaxonFromApiData($ref->data);
+            if ($updatedTaxon) {
+                return $updatedTaxon;
+            }
+        }
+
         return $taxon;
     }
 

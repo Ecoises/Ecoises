@@ -9,6 +9,7 @@ use App\Services\GamificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class ObservationController extends Controller
 {
@@ -101,18 +102,33 @@ class ObservationController extends Controller
      */
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'taxon_id'      => 'nullable|integer|exists:taxa,id',
-            'latitude'      => 'nullable|numeric|between:-90,90',
-            'longitude'     => 'nullable|numeric|between:-180,180',
-            'location_name' => 'nullable|string|max:255',
-            'observed_at'   => 'nullable|date',
-            'description'   => 'nullable|string|max:2000',
-            'notes'         => 'nullable|string|max:1000',
-            'is_public'     => 'sometimes|boolean',
-            'photos'        => 'nullable|array|max:5',
-            'photos.*'      => 'image|mimes:jpeg,png,jpg,webp|max:8192',
-        ]);
+        try {
+            $validated = $request->validate([
+                'taxon_id'      => 'nullable|integer|exists:taxa,id',
+                'latitude'      => 'nullable|numeric|between:-90,90',
+                'longitude'     => 'nullable|numeric|between:-180,180',
+                'location_name' => 'nullable|string|max:255',
+                'observed_at'   => 'nullable|date',
+                'description'   => 'nullable|string|max:2000',
+                'notes'         => 'nullable|string|max:1000',
+                'is_public'     => 'sometimes|boolean',
+                'photos'        => 'nullable|array|max:5',
+                'photos.*'      => 'image|mimes:jpeg,png,jpg,webp|max:8192',
+            ]);
+        } catch (ValidationException $e) {
+            Log::warning('Validación fallida al crear observación', [
+                'user_id' => optional($request->user())->id,
+                'errors' => $e->errors(),
+                'input' => $request->except(['photos']),
+                'photos_count' => is_array($request->file('photos')) ? count($request->file('photos')) : 0,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos en la observación.',
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
         try {
             // Crear la observación
@@ -154,7 +170,7 @@ class ObservationController extends Controller
             $observation->update(['points_awarded' => $points]);
 
             // Recargar con relaciones para la respuesta
-            $observation->load(['user:id,name,avatar', 'taxon:id,scientific_name,common_name', 'photos']);
+            $observation->load(['user:id,full_name,avatar', 'taxon:id,scientific_name,common_name', 'photos']);
 
             return response()->json([
                 'success' => true,
@@ -197,20 +213,36 @@ class ObservationController extends Controller
             ], 403);
         }
 
-        $validated = $request->validate([
-            'taxon_id'      => 'nullable|integer|exists:taxa,id',
-            'latitude'      => 'nullable|numeric|between:-90,90',
-            'longitude'     => 'nullable|numeric|between:-180,180',
-            'location_name' => 'nullable|string|max:255',
-            'observed_at'   => 'nullable|date',
-            'description'   => 'nullable|string|max:2000',
-            'notes'         => 'nullable|string|max:1000',
-            'is_public'     => 'sometimes|boolean',
-            'photos'        => 'nullable|array|max:5',
-            'photos.*'      => 'image|mimes:jpeg,png,jpg,webp|max:8192',
-            'delete_photos' => 'nullable|array',
-            'delete_photos.*' => 'integer',
-        ]);
+        try {
+            $validated = $request->validate([
+                'taxon_id'      => 'nullable|integer|exists:taxa,id',
+                'latitude'      => 'nullable|numeric|between:-90,90',
+                'longitude'     => 'nullable|numeric|between:-180,180',
+                'location_name' => 'nullable|string|max:255',
+                'observed_at'   => 'nullable|date',
+                'description'   => 'nullable|string|max:2000',
+                'notes'         => 'nullable|string|max:1000',
+                'is_public'     => 'sometimes|boolean',
+                'photos'        => 'nullable|array|max:5',
+                'photos.*'      => 'image|mimes:jpeg,png,jpg,webp|max:8192',
+                'delete_photos' => 'nullable|array',
+                'delete_photos.*' => 'integer',
+            ]);
+        } catch (ValidationException $e) {
+            Log::warning('Validación fallida al actualizar observación', [
+                'user_id' => optional($request->user())->id,
+                'observation_id' => $observation->id,
+                'errors' => $e->errors(),
+                'input' => $request->except(['photos']),
+                'photos_count' => is_array($request->file('photos')) ? count($request->file('photos')) : 0,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos inválidos al actualizar la observación.',
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
         try {
             // Actualizar datos básicos
