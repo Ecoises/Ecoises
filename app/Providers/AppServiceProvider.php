@@ -34,5 +34,13 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('login', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip());
         });
+
+        // Registrar comandos personalizados
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                \App\Console\Commands\BackfillNationalCatalogCommand::class,
+                \App\Console\Commands\SyncStaleSpeciesCommand::class,
+            ]);
+        }
     }
 }

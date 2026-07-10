@@ -61,4 +61,10 @@ return [
         'api_key' => env('ELEVENLABS_API_KEY'),
     ],
 
+    'explorer' => [
+        'cell_size_km' => (int) env('EXPLORER_CELL_SIZE_KM', 50),
+        'max_species_per_cell' => (int) env('EXPLORER_MAX_SPECIES_PER_CELL', 500),
+        'preload_cities' => env('EXPLORER_PRELOAD_CITIES', true),
+    ],
+
 ];

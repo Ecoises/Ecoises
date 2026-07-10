@@ -41,8 +41,8 @@ class GbifService extends BaseApiService
             'country' => 'CO', // Colombia
             'limit' => 0,      // No queremos registros individuales, solo el facet
             'facet' => 'speciesKey',
-            'facetLimit' => $filters['per_page'] ?? 20,
-            'facetOffset' => ($filters['per_page'] ?? 20) * (($filters['page'] ?? 1) - 1),
+            'facetLimit' => 300,  // Máximo de especies por request (GBIF permite esto)
+            'facetOffset' => 300 * (($filters['page'] ?? 1) - 1),  // Paginación de 300
             'hasCoordinate' => 'true',
             'hasGeospatialIssue' => 'false',
         ];
@@ -240,6 +240,44 @@ class GbifService extends BaseApiService
         ];
         
         return $this->makeRequest('get', '/occurrence/search', $gbifParams, true);
+    }
+
+    /**
+     * Busca especies en una región geográfica (por coordenadas y radio)
+     * 
+     * Usa GBIF /occurrence/search con geometry (WKT) para hacer búsqueda de radio
+     * y facet=speciesKey para obtener especies únicas sin paginación infinita.
+     *
+     * @param float $latitude
+     * @param float $longitude
+     * @param float $radiusKm
+     * @return array
+     */
+    public function searchOccurrencesByRegion(float $latitude, float $longitude, float $radiusKm = 50): array
+    {
+        $latDeg = $radiusKm / 111.0;
+        $lngDeg = $radiusKm / (111.0 * cos(deg2rad($latitude)));
+
+        $minLat = max(-90, $latitude - $latDeg);
+        $maxLat = min(90, $latitude + $latDeg);
+        $minLng = max(-180, $longitude - $lngDeg);
+        $maxLng = min(180, $longitude + $lngDeg);
+
+        $params = [
+            'country' => 'CO',
+            'decimalLatitude' => "{$minLat},{$maxLat}",
+            'decimalLongitude' => "{$minLng},{$maxLng}",
+            'limit' => 300,
+            'hasCoordinate' => 'true',
+            'hasGeospatialIssue' => 'false',
+        ];
+
+        Log::info("Busca ocurrencias GBIF por región", [
+            'lat' => $latitude, 'lon' => $longitude, 'radius_km' => $radiusKm,
+            'bbox' => "$minLat,$minLng,$maxLat,$maxLng",
+        ]);
+
+        return $this->makeRequest('get', '/occurrence/search', $params, true);
     }
 
     /**

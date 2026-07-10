@@ -676,6 +676,7 @@ class TaxonService
             $flags = $this->extractEstablishmentStatusFromApiData($taxonData);
             $taxon->is_native = $flags['is_native'];
             $taxon->is_endemic = $flags['is_endemic'];
+            $taxon->is_introduced = $flags['is_introduced'] ?? false;
 
             $taxon->conservation_status = $this->mapConservationStatus($taxonData['conservation_statuses'] ?? $taxonData['conservation_status'] ?? null);
             $taxon->observation_count = ($taxon->observation_count ?? 0) + ($taxonData['observations_count'] ?? 0);
@@ -847,19 +848,19 @@ public function extractEstablishmentStatusFromApiData(array $apiData): array
     if (!empty($apiData['endemic'])) {
         $status = 'endemic';
         Log::info('⚠️ Status inferido de flag endemic', ['status' => $status]);
-        return ['is_native' => true, 'is_endemic' => true, 'status' => $status];
+        return ['is_native' => true, 'is_endemic' => true, 'is_introduced' => false, 'status' => $status];
     }
     
     if (!empty($apiData['introduced'])) {
         $status = 'introduced';
         Log::info('⚠️ Status inferido de flag introduced', ['status' => $status]);
-        return ['is_native' => false, 'is_endemic' => false, 'status' => $status];
+        return ['is_native' => false, 'is_endemic' => false, 'is_introduced' => true, 'status' => $status];
     }
     
     if (!empty($apiData['native'])) {
         $status = 'native';
         Log::info('⚠️ Status inferido de flag native', ['status' => $status]);
-        return ['is_native' => true, 'is_endemic' => false, 'status' => $status];
+        return ['is_native' => true, 'is_endemic' => false, 'is_introduced' => false, 'status' => $status];
     }
 
     // No se pudo determinar
@@ -867,7 +868,7 @@ public function extractEstablishmentStatusFromApiData(array $apiData): array
         'available_keys' => array_keys($apiData)
     ]);
     
-    return ['is_native' => false, 'is_endemic' => false, 'status' => 'unknown'];
+    return ['is_native' => false, 'is_endemic' => false, 'is_introduced' => false, 'status' => 'unknown'];
 }
 
 /**
@@ -878,12 +879,12 @@ public function mapEstablishmentMeans(?string $status): array
     $statusLower = strtolower($status ?? '');
     
     $map = [
-        'endemic' => ['is_native' => true, 'is_endemic' => true, 'status' => 'endemic'],
-        'native' => ['is_native' => true, 'is_endemic' => false, 'status' => 'native'],
-        'introduced' => ['is_native' => false, 'is_endemic' => false, 'status' => 'introduced'],
+        'endemic' => ['is_native' => true, 'is_endemic' => true, 'is_introduced' => false, 'status' => 'endemic'],
+        'native' => ['is_native' => true, 'is_endemic' => false, 'is_introduced' => false, 'status' => 'native'],
+        'introduced' => ['is_native' => false, 'is_endemic' => false, 'is_introduced' => true, 'status' => 'introduced'],
     ];
     
-    return $map[$statusLower] ?? ['is_native' => false, 'is_endemic' => false, 'status' => 'unknown'];
+    return $map[$statusLower] ?? ['is_native' => false, 'is_endemic' => false, 'is_introduced' => false, 'status' => 'unknown'];
 }
 
     /**
@@ -1196,9 +1197,13 @@ public function mapEstablishmentMeans(?string $status): array
             $page = (int)($filters['page'] ?? 1);
             $orderBy = $filters['order_by'] ?? 'observations_count';
             $q = $filters['q'] ?? null;
+            $lat = (float)($filters['latitude'] ?? null);
+            $lon = (float)($filters['longitude'] ?? null);
+            $radiusKm = (float)($filters['radius_km'] ?? 50);
 
-            // 2. Consulta base sobre el catálogo local de taxa
-            $query = Taxa::with(['apiReferences']);
+            // 2. Consulta base sobre el catálogo local de taxa (solo enriquecidas)
+            $query = Taxa::with(['apiReferences'])
+                ->where('sync_status', 'synced'); // Solo mostrar especies que se sincronizaron exitosamente
 
             // Filtro por término de búsqueda (q)
             if (!empty($q)) {
@@ -1249,6 +1254,36 @@ public function mapEstablishmentMeans(?string $status): array
             foreach ($taxa as $taxon) {
                 $taxon = $this->ensureTaxonIsEnriched($taxon);
                 $formattedTaxa[] = $taxon->enriched_data;
+            }
+
+            // 4. Cache miss: Si no hay especies en esta zona, dispara sincronización
+            if ($paginator->total() === 0 && $lat !== null && $lon !== null) {
+                Log::info("📍 Cache miss en zona nueva, encolando sincronización", [
+                    'latitude' => $lat,
+                    'longitude' => $lon,
+                    'radius_km' => $radiusKm,
+                ]);
+                
+                \App\Jobs\SyncRegionOccurrencesJob::dispatch($lat, $lon, $radiusKm)
+                    ->onQueue('species-sync');
+                
+                // Responder honestamente: "Todavía cargando datos de tu zona"
+                return [
+                    'success' => true,
+                    'data' => [],
+                    'pagination' => [
+                        'total' => 0,
+                        'per_page' => $perPage,
+                        'current_page' => $page,
+                        'last_page' => 1,
+                        'from' => null,
+                        'to' => null,
+                    ],
+                    'source' => 'local_cache',
+                    'cached' => true,
+                    'loading' => true,
+                    'message' => 'Estamos cargando la información de biodiversidad en tu zona. Por favor, intenta de nuevo en un momento.',
+                ];
             }
 
             return [

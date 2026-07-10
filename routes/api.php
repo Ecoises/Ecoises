@@ -40,6 +40,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/activities/{id}/attempt', [\App\Http\Controllers\Api\ActivityController::class, 'attempt']);
 });
 
+// ── Explorer Geográfico (GBIF proxy) ───────────────────────────────────────────
+use App\Http\Controllers\Api\ExplorerController;
+
+Route::get('/explorer/nearby', [ExplorerController::class, 'explore']);
+
 // Ruta para Especies Diarias con IA
 use App\Http\Controllers\Api\DailySpeciesController;
 Route::get('/daily-curiosities', [DailySpeciesController::class, 'index']);

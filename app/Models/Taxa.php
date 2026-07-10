@@ -30,6 +30,7 @@ class Taxa extends Model
         'conservation_status',
         'is_native',
         'is_endemic',
+        'is_introduced',
         'observation_count',
         'last_observed_at',
         // Trazabilidad local del inventario
@@ -37,6 +38,12 @@ class Taxa extends Model
         'inventory_author',
         'local_records_count',
         'attribution',
+        // Sincronización con APIs externas
+        'last_synced_at',
+        'sync_status',
+        'sync_attempts',
+        'gbif_taxon_key',
+        'inat_taxon_id',
     ];
     
     /**
@@ -47,7 +54,9 @@ class Taxa extends Model
     protected $casts = [
         'is_native' => 'boolean',
         'is_endemic' => 'boolean',
+        'is_introduced' => 'boolean',
         'last_observed_at' => 'datetime',
+        'last_synced_at' => 'datetime',
     ];
 
     // Relaciones
@@ -73,12 +82,10 @@ class Taxa extends Model
    public function getEnrichedDataAttribute(): array
 {
     $enriched = $this->toArray();
-
-    $enriched = $this->toArray();
     
     // Usamos la propiedad (colección eager loaded) en vez del método (query)
     // para aprovechar el eager loading del Service
-    $ref = $this->apiReferences->first();
+    $ref = $this->apiReferences->firstWhere('api_source', 'inaturalist');
     if ($ref && $ref->data) {
         $apiData = $ref->data;
         $enriched = array_merge($enriched, [
@@ -98,6 +105,7 @@ class Taxa extends Model
         $establishmentData = $service->extractEstablishmentStatusFromApiData($apiData);
         $enriched['is_native'] = $establishmentData['is_native'];
         $enriched['is_endemic'] = $establishmentData['is_endemic'];
+        $enriched['is_introduced'] = $establishmentData['is_introduced'];
         $enriched['establishment_status_colombia'] = $establishmentData['status'];  // Para frontend
     }
 
