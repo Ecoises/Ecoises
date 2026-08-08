@@ -44,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
 use App\Http\Controllers\Api\ExplorerController;
 
 Route::get('/explorer/nearby', [ExplorerController::class, 'explore']);
+Route::get('/explorer/national', [ExplorerController::class, 'national']);
 
 // Ruta para Especies Diarias con IA
 use App\Http\Controllers\Api\DailySpeciesController;

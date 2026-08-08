@@ -83,7 +83,7 @@ abstract class BaseApiService implements ApiServiceInterface
             
             // Guardar en caché si la respuesta fue exitosa
             if ($useCache) {
-                $this->saveToCache($cacheKey, $endpoint, $data);
+                $this->saveToCache($cacheKey, $endpoint, $data, null, $params);
             }
             
             return [
@@ -165,15 +165,14 @@ abstract class BaseApiService implements ApiServiceInterface
             
         if ($cached) {
             // Actualizar contador de accesos y última fecha de acceso
-            $cached->increment('hit_count');
-            $cached->update(['last_accessed_at' => now()]);
+            $cached->increment('hit_count', 1, ['last_accessed_at' => now()]);
             
             return [
                 'success' => true,
                 'data' => $cached->response_data,
                 'cached' => true,
                 'api' => $this->apiName,
-                'endpoint' => $cached->endpoint,
+                'endpoint' => $cached->request_url,
             ];
         }
         
@@ -189,16 +188,22 @@ abstract class BaseApiService implements ApiServiceInterface
      * @param int|null $ttl
      * @return void
      */
-    protected function saveToCache(string $cacheKey, string $endpoint, $data, ?int $ttl = null): void
+    protected function saveToCache(string $cacheKey, string $endpoint, $data, ?int $ttl = null, array $params = []): void
     {
         $ttl = $ttl ?? $this->cacheTtl;
         
         UnifiedApiCache::updateOrCreate(
             ['cache_key' => $cacheKey],
             [
+                'cache_type' => str_contains($endpoint, 'search') || str_contains($endpoint, 'match')
+                    ? 'search_results'
+                    : 'taxon_data',
                 'api_source' => $this->apiName,
-                'endpoint' => $endpoint,
+                'data_type' => str_starts_with($endpoint, '/species/') ? 'taxonomía' : 'búsqueda',
+                'request_url' => $endpoint,
+                'request_params' => $params ?: null,
                 'response_data' => $data,
+                'response_metadata' => ['method' => 'GET'],
                 'expires_at' => now()->addMinutes($ttl),
                 'last_accessed_at' => now(),
                 'hit_count' => 0,

@@ -2,10 +2,17 @@
 
 namespace App\Services\Api;
 
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
+use App\Models\UnifiedApiCache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class GbifService extends BaseApiService
 {
+    private const NEARBY_FACET_LIMIT = 2000;
+
     /**
      * @var string
      */
@@ -200,9 +207,93 @@ class GbifService extends BaseApiService
     }
     
     // Alias interno si se usa en otros lados, o refactorizar llamadas internas a getTaxonById
-    public function getSpeciesDetails($key) {
-        $res = $this->getTaxonById((string)$key);
-        return $res['success'] ? $this->makeRequest('get', "/species/{$key}", [], true)['data'] : null;
+    public function getSpeciesDetails($key)
+    {
+        $response = $this->makeRequest('get', "/species/{$key}", [], true);
+
+        return $response['success'] ? $response['data'] : null;
+    }
+
+    /**
+     * Hydrates a page of GBIF species concurrently while preserving the
+     * application's persistent API cache.
+     *
+     * @return array<string, array>
+     */
+    public function getSpeciesDetailsBatch(array $speciesKeys): array
+    {
+        $details = [];
+        $missing = [];
+        $keys = array_values(array_unique(array_map('strval', $speciesKeys)));
+        $cacheKeysBySpecies = [];
+
+        foreach ($keys as $key) {
+            $cacheKeysBySpecies[$key] = $this->generateCacheKey('get', "/species/{$key}");
+        }
+
+        $cachedRows = UnifiedApiCache::query()
+            ->whereIn('cache_key', array_values($cacheKeysBySpecies))
+            ->where('expires_at', '>', now())
+            ->get()
+            ->keyBy('cache_key');
+        $hitCacheKeys = [];
+
+        foreach ($cacheKeysBySpecies as $key => $cacheKey) {
+            $cached = $cachedRows->get($cacheKey);
+            if ($cached) {
+                $details[$key] = $cached->response_data;
+                $hitCacheKeys[] = $cacheKey;
+            } else {
+                $missing[] = $key;
+            }
+        }
+
+        if ($hitCacheKeys !== []) {
+            UnifiedApiCache::query()
+                ->whereIn('cache_key', $hitCacheKeys)
+                ->update([
+                    'hit_count' => DB::raw('hit_count + 1'),
+                    'last_accessed_at' => now(),
+                ]);
+        }
+
+        if ($missing === []) {
+            return $details;
+        }
+
+        $baseUrl = rtrim($this->config['base_url'], '/');
+        $timeout = (int) ($this->config['timeout'] ?? 30);
+
+        $responses = Http::pool(function (Pool $pool) use ($missing, $baseUrl, $timeout) {
+            return array_map(
+                fn (string $key) => $pool
+                    ->as($key)
+                    ->withHeaders($this->getDefaultHeaders())
+                    ->timeout($timeout)
+                    ->get("{$baseUrl}/species/{$key}"),
+                $missing
+            );
+        });
+
+        foreach ($missing as $key) {
+            $response = $responses[$key] ?? null;
+            if (!$response instanceof Response || !$response->successful()) {
+                Log::warning('No se pudo hidratar un taxón de GBIF', ['species_key' => $key]);
+                continue;
+            }
+
+            $data = $response->json();
+            if (!is_array($data)) {
+                continue;
+            }
+
+            $endpoint = "/species/{$key}";
+            $cacheKey = $this->generateCacheKey('get', $endpoint);
+            $this->saveToCache($cacheKey, $endpoint, $data);
+            $details[$key] = $data;
+        }
+
+        return $details;
     }
 
     /**
@@ -255,31 +346,152 @@ class GbifService extends BaseApiService
      */
     public function searchOccurrencesByRegion(float $latitude, float $longitude, float $radiusKm = 50): array
     {
-        $latDeg = $radiusKm / 111.0;
-        $lngDeg = $radiusKm / (111.0 * cos(deg2rad($latitude)));
-
-        $minLat = max(-90, $latitude - $latDeg);
-        $maxLat = min(90, $latitude + $latDeg);
-        $minLng = max(-180, $longitude - $lngDeg);
-        $maxLng = min(180, $longitude + $lngDeg);
-
         $params = [
-            'country' => 'CO',
-            'decimalLatitude' => "{$minLat},{$maxLat}",
-            'decimalLongitude' => "{$minLng},{$maxLng}",
+            'geoDistance' => sprintf('%.6f,%.6f,%skm', $latitude, $longitude, $radiusKm),
             'limit' => 300,
             'hasCoordinate' => 'true',
             'hasGeospatialIssue' => 'false',
+            'occurrenceStatus' => 'PRESENT',
         ];
 
-        Log::info("Busca ocurrencias GBIF por región", [
-            'lat' => $latitude, 'lon' => $longitude, 'radius_km' => $radiusKm,
-            'bbox' => "$minLat,$minLng,$maxLat,$maxLng",
+        Log::info('Busca ocurrencias GBIF por región', [
+            'lat' => $latitude,
+            'lon' => $longitude,
+            'radius_km' => $radiusKm,
         ]);
 
         return $this->makeRequest('get', '/occurrence/search', $params, true);
     }
 
+    /**
+     * Returns the distinct species recorded inside a real circular radius.
+     * GBIF facets avoid downloading and de-duplicating arbitrary occurrence pages.
+     */
+    public function searchSpeciesByRegion(
+        float $latitude,
+        float $longitude,
+        float $radiusKm = 50,
+        array $filters = []
+    ): array {
+        return $this->searchSpeciesCatalog([
+            'geoDistance' => sprintf('%.6f,%.6f,%skm', $latitude, $longitude, $radiusKm),
+        ], $filters, [
+            'scope' => 'nearby',
+            'lat' => $latitude,
+            'lng' => $longitude,
+            'radius_km' => $radiusKm,
+        ]);
+    }
+
+    /**
+     * Returns the distinct species documented in a country, independently of
+     * which taxa have already been synchronized into the local database.
+     */
+    public function searchSpeciesByCountry(string $countryCode = 'CO', array $filters = []): array
+    {
+        return $this->searchSpeciesCatalog([
+            'country' => strtoupper($countryCode),
+        ], $filters, [
+            'scope' => 'country',
+            'country' => strtoupper($countryCode),
+        ]);
+    }
+
+    private function searchSpeciesCatalog(array $scopeParams, array $filters, array $context): array
+    {
+        $facetLimit = min(
+            self::NEARBY_FACET_LIMIT,
+            max(100, (int) ($filters['catalog_limit'] ?? self::NEARBY_FACET_LIMIT))
+        );
+
+        $params = array_merge($scopeParams, [
+            'limit' => 0,
+            'facet' => 'speciesKey',
+            'facetLimit' => $facetLimit,
+            'facetOffset' => 0,
+            'hasCoordinate' => 'true',
+            'hasGeospatialIssue' => 'false',
+            'occurrenceStatus' => 'PRESENT',
+        ]);
+
+        $requestedTaxon = $filters['taxon_key'] ?? null;
+        $query = trim((string) ($filters['q'] ?? ''));
+
+        if (!$requestedTaxon && $query !== '') {
+            $taxonMatch = $this->searchTaxon($query);
+            $match = $taxonMatch['data'][0] ?? null;
+            $matchType = strtoupper((string) ($match['matchType'] ?? 'NONE'));
+            $requestedTaxon = $matchType !== 'NONE'
+                ? ($match['usageKey'] ?? $match['acceptedUsageKey'] ?? $match['key'] ?? null)
+                : null;
+
+            if (!$requestedTaxon) {
+                return [
+                    'success' => true,
+                    'data' => [
+                        'buckets' => [],
+                        'occurrence_total' => 0,
+                        'truncated' => false,
+                        'facet_limit' => $facetLimit,
+                    ],
+                    'cached' => (bool) ($taxonMatch['cached'] ?? false),
+                    'api' => $this->apiName,
+                ];
+            }
+        }
+
+        if (!$requestedTaxon && !empty($filters['iconic_taxa'])) {
+            $taxonMatch = $this->searchTaxon((string) $filters['iconic_taxa']);
+            $match = $taxonMatch['data'][0] ?? null;
+            $requestedTaxon = $match['usageKey'] ?? $match['acceptedUsageKey'] ?? $match['key'] ?? null;
+        }
+
+        if ($requestedTaxon) {
+            $params['taxonKey'] = $requestedTaxon;
+        }
+
+        if (!empty($filters['native'])) {
+            $params['establishmentMeans'] = 'Native';
+        }
+
+        Log::info('Consultando catálogo de especies de GBIF', array_merge($context, [
+            'facet_limit' => $facetLimit,
+            'has_query' => $query !== '',
+            'taxon_key' => $params['taxonKey'] ?? null,
+        ]));
+
+        $response = $this->makeRequest('get', '/occurrence/search', $params, true);
+        if (!$response['success']) {
+            return $response;
+        }
+
+        $facet = collect($response['data']['facets'] ?? [])
+            ->first(function (array $item): bool {
+                $field = strtoupper(str_replace('-', '_', (string) ($item['field'] ?? '')));
+                return in_array($field, ['SPECIES_KEY', 'SPECIESKEY'], true);
+            });
+
+        $buckets = collect($facet['counts'] ?? [])
+            ->filter(fn (array $bucket) => isset($bucket['name']))
+            ->map(fn (array $bucket) => [
+                'species_key' => (string) $bucket['name'],
+                'occurrence_count' => (int) ($bucket['count'] ?? 0),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'success' => true,
+            'data' => [
+                'buckets' => $buckets,
+                'occurrence_total' => (int) ($response['data']['count'] ?? 0),
+                'truncated' => count($buckets) >= $facetLimit,
+                'facet_limit' => $facetLimit,
+            ],
+            'cached' => $response['cached'] ?? false,
+            'api' => $this->apiName,
+        ];
+    }
     /**
      * Obtiene info de ubicación
      * GBIF no maneja locations como entidades simples consultables por ID numérico estándar

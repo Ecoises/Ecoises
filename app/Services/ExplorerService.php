@@ -2,138 +2,265 @@
 
 namespace App\Services;
 
+use App\Jobs\EnrichSpeciesJob;
 use App\Models\Taxa;
 use App\Services\Api\GbifService;
-use App\Jobs\EnrichSpeciesJob;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 
 class ExplorerService
 {
-    protected GbifService $gbif;
+    private const CACHE_TTL_SECONDS = 1800;
+    private const THREATENED_STATUSES = ['VU', 'EN', 'CR'];
 
-    public function __construct(GbifService $gbif)
+    public function __construct(protected GbifService $gbif)
     {
-        $this->gbif = $gbif;
     }
 
     public function explore(float $lat, float $lng, array $filters = []): array
     {
-        $radius = (int)($filters['radius'] ?? 50);
-        $gbifCacheKey = "explorer_gbif:{$lat}:{$lng}:{$radius}";
+        $radius = (int) ($filters['radius'] ?? 50);
+        $gbifFilters = $this->buildGbifFilters($filters);
 
-        $speciesMap = Cache::remember($gbifCacheKey, 1800, function () use ($lat, $lng, $radius) {
-            return $this->fetchSpeciesFromGbif($lat, $lng, $radius);
-        });
+        $cacheKey = $this->catalogCacheKey($lat, $lng, $radius, $gbifFilters);
+        $catalogResult = Cache::remember(
+            $cacheKey,
+            self::CACHE_TTL_SECONDS,
+            fn () => $this->gbif->searchSpeciesByRegion($lat, $lng, $radius, $gbifFilters)
+        );
 
-        if (!$speciesMap) {
-            return ['success' => false, 'error' => 'Error al consultar GBIF'];
+        return $this->formatCatalogResult($catalogResult, $filters, $radius);
+    }
+
+    public function exploreNational(array $filters = []): array
+    {
+        $gbifFilters = $this->buildGbifFilters($filters);
+        $cacheFilters = $gbifFilters;
+        ksort($cacheFilters);
+        $cacheKey = 'explorer:country:v1:CO:' . sha1(json_encode($cacheFilters));
+        $catalogResult = Cache::remember(
+            $cacheKey,
+            self::CACHE_TTL_SECONDS,
+            fn () => $this->gbif->searchSpeciesByCountry('CO', $gbifFilters)
+        );
+
+        return $this->formatCatalogResult($catalogResult, $filters, null);
+    }
+
+    private function buildGbifFilters(array $filters): array
+    {
+        $query = trim((string) ($filters['q'] ?? ''));
+        $localTaxonKey = null;
+
+        if ($query !== '') {
+            $localTaxonKey = Taxa::query()
+                ->whereNotNull('gbif_taxon_key')
+                ->where(function ($builder) use ($query) {
+                    $builder->where('scientific_name', $query)
+                        ->orWhere('common_name', $query);
+                })
+                ->value('gbif_taxon_key');
         }
 
-        $keyToId = [];
-        $toEnrich = [];
+        return array_filter([
+            'q' => $query !== '' ? $query : null,
+            'taxon_key' => $localTaxonKey,
+            'iconic_taxa' => $filters['iconic_taxa'] ?? null,
+            'native' => !empty($filters['native']),
+            'catalog_limit' => 2000,
+        ], fn ($value) => $value !== null && $value !== '' && $value !== false);
+    }
 
-        foreach ($speciesMap as $speciesKey => $sp) {
-            $taxon = Taxa::firstOrCreate(
-                ['scientific_name' => $sp['scientific_name']],
-                ['sync_status' => 'pending']
-            );
-
-            if ($taxon->sync_status !== 'synced') {
-                $taxon->timestamps = false;
-                $update = ['gbif_taxon_key' => $speciesKey];
-                foreach (['kingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species'] as $field) {
-                    $dbField = $field === 'order' ? 'order_name' : $field;
-                    if (empty($taxon->$dbField) && !empty($sp['taxonomy'][$field])) {
-                        $update[$dbField] = $sp['taxonomy'][$field];
-                    }
-                }
-                $taxon->fill($update);
-                $taxon->save();
-                $taxon->timestamps = true;
-            }
-
-            $keyToId[$speciesKey] = $taxon->id;
-
-            if ($taxon->sync_status !== 'synced') {
-                $toEnrich[] = $sp['scientific_name'];
-            }
+    private function formatCatalogResult(array $catalogResult, array $filters, ?int $radius): array
+    {
+        if (!($catalogResult['success'] ?? false)) {
+            return [
+                'success' => false,
+                'error' => $catalogResult['error'] ?? 'Error al consultar GBIF',
+            ];
         }
 
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = min(50, max(10, (int) ($filters['per_page'] ?? 25)));
+        $catalogData = $catalogResult['data'] ?? [];
+        $buckets = collect($catalogData['buckets'] ?? []);
+        $usesEnrichmentFilter = !empty($filters['endemic']) || !empty($filters['threatened']);
+
+        if ($usesEnrichmentFilter && $buckets->isNotEmpty()) {
+            $buckets = $this->applyEnrichmentFilters($buckets, $filters);
+        }
+
+        if (($filters['order_by'] ?? null) === 'random') {
+            $seed = (string) ($filters['random_seed'] ?? now()->format('Y-m-d-H'));
+            $buckets = $buckets
+                ->sortBy(fn (array $bucket) => sha1($seed . ':' . $bucket['species_key']))
+                ->values();
+        }
+
+        $total = $buckets->count();
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $lastPage);
+        $pageBuckets = $buckets->slice(($page - 1) * $perPage, $perPage)->values();
+        $pageKeys = $pageBuckets->pluck('species_key')->map(fn ($key) => (string) $key)->all();
+        $detailsByKey = $this->gbif->getSpeciesDetailsBatch($pageKeys);
+
+        [$keyToId, $toEnrich] = $this->persistPageTaxa($pageBuckets, $detailsByKey);
         $taxaById = Taxa::with('apiReferences')
             ->whereIn('id', array_values($keyToId))
             ->get()
             ->keyBy('id');
 
         $results = [];
-        foreach ($speciesMap as $speciesKey => $sp) {
-            $taxon = $taxaById->get($keyToId[$speciesKey]);
-            if (!$taxon) continue;
+        foreach ($pageBuckets as $bucket) {
+            $speciesKey = (string) $bucket['species_key'];
+            $taxonId = $keyToId[$speciesKey] ?? null;
+            $taxon = $taxonId ? $taxaById->get($taxonId) : null;
+            if (!$taxon) {
+                continue;
+            }
 
             $item = $taxon->enriched_data;
-            $item['occurrence_count'] = $sp['occurrence_count'];
+            $gbifDetails = $detailsByKey[$speciesKey] ?? [];
+            $displayName = $gbifDetails['canonicalName']
+                ?? $gbifDetails['species']
+                ?? $gbifDetails['scientificName']
+                ?? $item['scientific_name'];
+            $item['scientific_name'] = SpeciesMerger::stripAuthorship($displayName);
+            $item['occurrence_count'] = (int) ($bucket['occurrence_count'] ?? 0);
+            if ($radius !== null) {
+                $item['nearby_radius_km'] = $radius;
+            }
             $results[] = $item;
         }
 
-        foreach ($toEnrich as $name) {
+        foreach (array_unique($toEnrich) as $name) {
             EnrichSpeciesJob::dispatch($name)->onQueue('species-sync');
         }
+
+        $from = $total === 0 ? 0 : (($page - 1) * $perPage) + 1;
+        $to = $total === 0 ? 0 : min($page * $perPage, $total);
 
         return [
             'success' => true,
             'data' => $results,
-            'enriching_count' => count($toEnrich),
-            'total_species' => count($speciesMap),
-            'source' => 'gbif',
+            'meta' => [
+                'source' => 'gbif',
+                'scope' => $radius === null ? 'national' : 'nearby',
+                'cached' => (bool) ($catalogResult['cached'] ?? false),
+                'radius_km' => $radius,
+                'occurrence_total' => (int) ($catalogData['occurrence_total'] ?? 0),
+                'catalog_truncated' => (bool) ($catalogData['truncated'] ?? false),
+                'enriching_count' => count(array_unique($toEnrich)),
+                'enrichment_filter_applied' => $usesEnrichmentFilter,
+                'pagination' => [
+                    'total' => $total,
+                    'per_page' => $perPage,
+                    'current_page' => $page,
+                    'last_page' => $lastPage,
+                    'from' => $from,
+                    'to' => $to,
+                ],
+            ],
         ];
     }
-
-    protected function fetchSpeciesFromGbif(float $lat, float $lng, float $radius): ?array
+    private function catalogCacheKey(float $lat, float $lng, int $radius, array $filters): string
     {
-        $gbifResult = $this->gbif->searchOccurrencesByRegion($lat, $lng, $radius);
+        ksort($filters);
+        $cellLat = number_format(round($lat, 3), 3, '.', '');
+        $cellLng = number_format(round($lng, 3), 3, '.', '');
 
-        if (!$gbifResult['success']) {
-            return null;
-        }
-
-        $occurrences = $gbifResult['data']['results'] ?? [];
-        $facetCounts = $this->extractFacetCounts($gbifResult['data']['facets'] ?? []);
-
-        $speciesMap = [];
-        foreach ($occurrences as $occ) {
-            $key = $occ['speciesKey'] ?? null;
-            $raw = $occ['species'] ?? $occ['scientificName'] ?? null;
-            $name = $raw ? SpeciesMerger::stripAuthorship($raw) : null;
-            if (!$key || !$name || isset($speciesMap[$key])) continue;
-            if (preg_match('/\b(sp\.|spec\.?|spp\.|cf\.|aff\.)\b/i', $name)) continue;
-
-            $speciesMap[$key] = [
-                'taxonomy' => [
-                    'kingdom' => $occ['kingdom'] ?? null,
-                    'phylum' => $occ['phylum'] ?? null,
-                    'class' => $occ['class'] ?? null,
-                    'order' => $occ['order'] ?? null,
-                    'family' => $occ['family'] ?? null,
-                    'genus' => $occ['genus'] ?? null,
-                    'species' => $occ['species'] ?? null,
-                ],
-                'scientific_name' => $name,
-                'occurrence_count' => $facetCounts[$key] ?? 0,
-            ];
-        }
-
-        return $speciesMap;
+        return 'explorer:species-facet:v4:' . sha1(json_encode([
+            'lat' => $cellLat,
+            'lng' => $cellLng,
+            'radius' => $radius,
+            'filters' => $filters,
+        ]));
     }
 
-    protected function extractFacetCounts(array $facets): array
+    private function applyEnrichmentFilters(Collection $buckets, array $filters): Collection
     {
-        $counts = [];
-        foreach ($facets as $facet) {
-            if (($facet['field'] ?? '') === 'speciesKey' || ($facet['field'] ?? '') === '') {
-                foreach ($facet['counts'] ?? [] as $entry) {
-                    $counts[(string)$entry['name']] = (int)($entry['count'] ?? 0);
+        $keys = $buckets->pluck('species_key')->map(fn ($key) => (string) $key)->all();
+        $query = Taxa::query()->whereIn('gbif_taxon_key', $keys);
+
+        if (!empty($filters['endemic'])) {
+            $query->where('is_endemic', true);
+        }
+
+        if (!empty($filters['threatened'])) {
+            $query->whereIn('conservation_status', self::THREATENED_STATUSES);
+        }
+
+        $eligible = $query->pluck('gbif_taxon_key')->map(fn ($key) => (string) $key)->flip();
+
+        return $buckets
+            ->filter(fn (array $bucket) => $eligible->has((string) $bucket['species_key']))
+            ->values();
+    }
+
+    /**
+     * @return array{0: array<string, int>, 1: array<int, string>}
+     */
+    private function persistPageTaxa(Collection $pageBuckets, array $detailsByKey): array
+    {
+        $keyToId = [];
+        $toEnrich = [];
+        $pageKeys = $pageBuckets
+            ->pluck('species_key')
+            ->map(fn ($key) => (string) $key)
+            ->all();
+        $existingByKey = Taxa::query()
+            ->whereIn('gbif_taxon_key', $pageKeys)
+            ->get()
+            ->keyBy(fn (Taxa $taxon) => (string) $taxon->gbif_taxon_key);
+
+        foreach ($pageBuckets as $bucket) {
+            $speciesKey = (string) $bucket['species_key'];
+            $details = $detailsByKey[$speciesKey] ?? null;
+            if (!$details) {
+                continue;
+            }
+
+            $rawName = $details['canonicalName'] ?? $details['species'] ?? $details['scientificName'] ?? null;
+            $scientificName = $rawName ? SpeciesMerger::stripAuthorship($rawName) : null;
+            if (!$scientificName) {
+                continue;
+            }
+
+            $taxon = $existingByKey->get($speciesKey)
+                ?? Taxa::firstOrCreate(
+                    ['scientific_name' => $scientificName],
+                    ['sync_status' => 'pending']
+                );
+
+            $updates = ['gbif_taxon_key' => $speciesKey];
+            foreach ([
+                'kingdom' => 'kingdom',
+                'phylum' => 'phylum',
+                'class' => 'class',
+                'order' => 'order_name',
+                'family' => 'family',
+                'genus' => 'genus',
+                'species' => 'species',
+            ] as $gbifField => $databaseField) {
+                if (empty($taxon->{$databaseField}) && !empty($details[$gbifField])) {
+                    $updates[$databaseField] = $details[$gbifField];
                 }
             }
+
+            $taxon->fill($updates);
+            if ($taxon->isDirty()) {
+                $taxon->timestamps = false;
+                $taxon->save();
+                $taxon->timestamps = true;
+            }
+            $existingByKey->put($speciesKey, $taxon);
+            $keyToId[$speciesKey] = $taxon->id;
+
+            if (in_array($taxon->sync_status, ['pending', 'failed'], true)) {
+                $toEnrich[] = $scientificName;
+            }
         }
-        return $counts;
+
+        return [$keyToId, $toEnrich];
     }
 }

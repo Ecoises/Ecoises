@@ -28,6 +28,11 @@ class Taxa extends Model
         'genus',
         'species',
         'conservation_status',
+        'conservation_status_source',
+        'conservation_status_scope',
+        'conservation_status_authority',
+        'conservation_status_url',
+        'conservation_status_synced_at',
         'is_native',
         'is_endemic',
         'is_introduced',
@@ -57,6 +62,7 @@ class Taxa extends Model
         'is_introduced' => 'boolean',
         'last_observed_at' => 'datetime',
         'last_synced_at' => 'datetime',
+        'conservation_status_synced_at' => 'datetime',
     ];
 
     // Relaciones

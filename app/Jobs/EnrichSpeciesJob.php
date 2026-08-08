@@ -8,6 +8,7 @@ use App\Services\SpeciesMerger;
 use App\Services\Api\GbifService;
 use App\Services\Api\INaturalistService;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -16,13 +17,14 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Database\UniqueConstraintViolationException;
 
-class EnrichSpeciesJob implements ShouldQueue
+class EnrichSpeciesJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public $tries = 3;
     public $backoff = [30, 120, 600]; // 30s, 2min, 10min
     public $timeout = 120;
+    public $uniqueFor = 3600;
 
     /**
      * Nombre científico ya normalizado (canonical)
@@ -40,6 +42,10 @@ class EnrichSpeciesJob implements ShouldQueue
         $this->onQueue('species-sync');
     }
 
+    public function uniqueId(): string
+    {
+        return mb_strtolower(SpeciesMerger::stripAuthorship($this->canonicalName));
+    }
     // Sin middleware: cola species-sync tiene 1 solo worker, no hay race conditions
 
     /**

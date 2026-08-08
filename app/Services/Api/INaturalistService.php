@@ -2,6 +2,8 @@
 
 namespace App\Services\Api;
 
+use App\Services\ConservationStatusResolver;
+
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
@@ -9,6 +11,10 @@ use Illuminate\Support\Facades\Cache;
 
 class INaturalistService extends BaseApiService
 {
+    public function __construct(protected ConservationStatusResolver $conservationStatusResolver)
+    {
+        parent::__construct();
+    }
     /**
      * @var string
      */
@@ -758,62 +764,26 @@ class INaturalistService extends BaseApiService
      * @return array|null
      */
     protected function extractConservationStatus($status): ?array
-{
-    if (!$status) {
-        return null;
-    }
-    
-    // Si es un array de conservation_statuses, tomar el primero (IUCN global)
-    if (is_array($status) && isset($status[0])) {
-        $firstStatus = $status[0];
-        return [
-            'status' => $firstStatus['status'] ?? null,
-            'status_name' => $this->getConservationStatusName($firstStatus['status'] ?? null),
-            'iucn' => $firstStatus['iucn'] ?? null,
-            'authority' => $firstStatus['authority'] ?? null,
-            'url' => $firstStatus['url'] ?? null,
-            'geoprivacy' => $firstStatus['geoprivacy'] ?? null,
-        ];
-    }
-    
-    // Si es un objeto simple
-    if (is_array($status)) {
-        return [
-            'status' => $status['status'] ?? null,
-            'status_name' => $status['status_name'] ?? null,
-            'iucn' => $status['iucn'] ?? null,
-            'authority' => $status['authority'] ?? null,
-            'geoprivacy' => $status['geoprivacy'] ?? null,
-        ];
-    }
-    
-    return null;
-}
+    {
+        $resolved = $this->conservationStatusResolver->resolve(
+            $status,
+            (int) config('services.inaturalist.preferred_place_id', 7196)
+        );
 
-/**
- * Obtiene el nombre legible del status de conservación IUCN
- */
-protected function getConservationStatusName(?string $status): ?string
-{
-    if (!$status) {
-        return null;
+        if (!$resolved['code']) {
+            return null;
+        }
+
+        return [
+            'status' => $resolved['code'],
+            'status_name' => $resolved['status_name'],
+            'iucn' => $resolved['iucn'],
+            'authority' => $resolved['authority'],
+            'url' => $resolved['url'],
+            'place_id' => $resolved['place_id'],
+            'scope' => $resolved['scope'],
+        ];
     }
-    
-    $map = [
-        'LC' => 'Least Concern (Preocupación Menor)',
-        'NT' => 'Near Threatened (Casi Amenazado)',
-        'VU' => 'Vulnerable',
-        'EN' => 'Endangered (En Peligro)',
-        'CR' => 'Critically Endangered (En Peligro Crítico)',
-        'EW' => 'Extinct in the Wild (Extinto en Estado Silvestre)',
-        'EX' => 'Extinct (Extinto)',
-        'DD' => 'Data Deficient (Datos Insuficientes)',
-        'NE' => 'Not Evaluated (No Evaluado)',
-    ];
-    
-    return $map[$status] ?? $status;
-}
-    
     /**
      * Extrae información de los ancestros de un taxón
      *

@@ -24,15 +24,21 @@ class TaxonService
      * @var Api\GbifService
      */
     protected $gbifService;
+
+    protected $conservationStatusResolver;
     
     /**
      * @param INaturalistService $iNaturalistService
      * @param Api\GbifService $gbifService
      */
-    public function __construct(INaturalistService $iNaturalistService, Api\GbifService $gbifService)
-    {
+    public function __construct(
+        INaturalistService $iNaturalistService,
+        Api\GbifService $gbifService,
+        ConservationStatusResolver $conservationStatusResolver
+    ) {
         $this->iNaturalistService = $iNaturalistService;
         $this->gbifService = $gbifService;
+        $this->conservationStatusResolver = $conservationStatusResolver;
     }
     
     /**
@@ -678,7 +684,28 @@ class TaxonService
             $taxon->is_endemic = $flags['is_endemic'];
             $taxon->is_introduced = $flags['is_introduced'] ?? false;
 
-            $taxon->conservation_status = $this->mapConservationStatus($taxonData['conservation_statuses'] ?? $taxonData['conservation_status'] ?? null);
+            $conservation = $this->conservationStatusResolver->resolve(
+                $taxonData['conservation_statuses'] ?? $taxonData['conservation_status'] ?? null,
+                (int) config('services.inaturalist.preferred_place_id', 7196)
+            );
+            $taxon->conservation_status_synced_at = now();
+
+            if ($conservation['code']) {
+                $taxon->conservation_status = $conservation['code'];
+                $taxon->conservation_status_source = 'inaturalist';
+                $taxon->conservation_status_scope = $conservation['scope'];
+                $taxon->conservation_status_authority = $conservation['authority'];
+                $taxon->conservation_status_url = $conservation['url'];
+            } elseif ($taxon->conservation_status === 'NE' || $taxon->conservation_status_source === 'inaturalist') {
+                // iNaturalist sin evaluación no equivale a la categoría formal NE.
+                $taxon->conservation_status = null;
+                $taxon->conservation_status_source = 'inaturalist';
+                $taxon->conservation_status_scope = null;
+                $taxon->conservation_status_authority = null;
+                $taxon->conservation_status_url = null;
+            } elseif ($taxon->conservation_status && !$taxon->conservation_status_source) {
+                $taxon->conservation_status_source = 'legacy';
+            }
             $taxon->observation_count = ($taxon->observation_count ?? 0) + ($taxonData['observations_count'] ?? 0);
             $taxon->last_observed_at = now();
             $taxon->save();
@@ -931,103 +958,6 @@ public function mapEstablishmentMeans(?string $status): array
             $ancestry['species'] = $species;
         }
         return $ancestry;
-    }
-
-    /**
-     * Mapea status de conservación a formato ENUM de tu base de datos
-     * CORREGIDO: iNaturalist devuelve directamente los códigos IUCN (LC, VU, EN, etc.)
-     * 
-     * @param mixed $apiStatus Puede ser string, array o null
-     * @return string El código IUCN o 'NE' si no se encuentra
-     */
-    protected function mapConservationStatus($apiStatus): string
-    {
-        // Si es null, retornar 'NE' (No Evaluado)
-        if ($apiStatus === null) {
-            return 'NE';
-        }
-        
-        // Si es un array (conservation_statuses de iNaturalist)
-        if (is_array($apiStatus)) {
-            // Si está vacío, retornar 'NE'
-            if (empty($apiStatus)) {
-                return 'NE';
-            }
-            
-            // Tomar el primer status (generalmente IUCN global)
-            $firstStatus = $apiStatus[0] ?? null;
-            
-            if ($firstStatus && isset($firstStatus['status'])) {
-                $statusCode = $firstStatus['status'];
-                Log::info('📊 Status de conservación extraído', [
-                    'raw' => $firstStatus,
-                    'status_code' => $statusCode,
-                    'authority' => $firstStatus['authority'] ?? 'unknown'
-                ]);
-                
-                // Validar que sea un código IUCN válido
-                if ($this->isValidIUCNStatus($statusCode)) {
-                    return $statusCode;
-                }
-            }
-            
-            return 'NE';
-        }
-        
-        // Si es un string directo, validar y retornar
-        if (is_string($apiStatus)) {
-            // Normalizar a mayúsculas
-            $statusUpper = strtoupper($apiStatus);
-            
-            // Si ya es un código IUCN válido, retornarlo
-            if ($this->isValidIUCNStatus($statusUpper)) {
-                return $statusUpper;
-            }
-            
-            // Si está en formato de texto completo en inglés, convertir
-            $textToCodeMap = [
-                'least_concern' => 'LC',
-                'least concern' => 'LC',
-                'near_threatened' => 'NT',
-                'near threatened' => 'NT',
-                'vulnerable' => 'VU',
-                'endangered' => 'EN',
-                'critically_endangered' => 'CR',
-                'critically endangered' => 'CR',
-                'extinct_in_the_wild' => 'EW',
-                'extinct in the wild' => 'EW',
-                'extinct' => 'EX',
-                'data_deficient' => 'DD',
-                'data deficient' => 'DD',
-                'not_evaluated' => 'NE',
-                'not evaluated' => 'NE',
-            ];
-            
-            $statusLower = strtolower($apiStatus);
-            if (isset($textToCodeMap[$statusLower])) {
-                return $textToCodeMap[$statusLower];
-            }
-        }
-        
-        // Si no se pudo determinar, retornar 'NE'
-        Log::warning('⚠️ No se pudo mapear conservation status', [
-            'input' => $apiStatus,
-            'type' => gettype($apiStatus)
-        ]);
-        
-        return 'NE';
-    }
-
-    /**
-     * Valida si un código es un status IUCN válido
-     * 
-     * @param string $code
-     * @return bool
-     */
-    protected function isValidIUCNStatus(string $code): bool
-    {
-        $validCodes = ['LC', 'NT', 'VU', 'EN', 'CR', 'EW', 'EX', 'DD', 'NE'];
-        return in_array(strtoupper($code), $validCodes);
     }
 
     /**
