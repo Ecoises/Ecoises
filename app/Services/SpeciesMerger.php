@@ -13,9 +13,27 @@ class SpeciesMerger
      */
     public static function stripAuthorship(string $name): string
     {
-        $name = preg_replace('/\s*\(.*?\)\s*$/', '', $name);
-        $name = preg_replace('/^(.*?)\s+(var\.|subsp\.|f\.)\s.*/i', '$1', $name);
-        return trim($name);
+        $pattern = '/^([A-Z][a-z\-]+)\s+(?:[×x]\s+)?([a-z\-]+)(?:\s+(?:subsp\.|var\.|f\.|subspecies)\s+([a-z\-]+)|(?:\s+([a-z\-]+)))?/iu';
+        if (preg_match($pattern, $name, $matches)) {
+            $genus = $matches[1];
+            $hybrid = str_contains($matches[0], ' × ') ? ' × ' : (str_contains($matches[0], ' x ') ? ' x ' : ' ');
+            $species = $matches[2];
+            
+            $clean = $genus . $hybrid . $species;
+            
+            if (!empty($matches[3])) {
+                if (preg_match('/\s+(subsp\.|var\.|f\.|subspecies)\s+/i', $name, $rankMatches)) {
+                    $clean .= ' ' . $rankMatches[1] . ' ' . $matches[3];
+                }
+            } elseif (!empty($matches[4])) {
+                $infra = $matches[4];
+                if (ctype_lower(str_replace('-', '', $infra))) {
+                    $clean .= ' ' . $infra;
+                }
+            }
+            return $clean;
+        }
+        return trim(preg_replace('/\s*\(.*?\)\s*$/', '', $name));
     }
 
     /**
