@@ -198,24 +198,44 @@ class EolService extends BaseApiService
                 'description' => 'Consume restos de animales y contribuye al reciclaje de materia orgánica dentro del ecosistema.',
             ],
             [
-                'patterns' => ['poliniz', 'pollinat'],
-                'name' => 'Polinizador',
-                'description' => 'Transporta polen entre flores y favorece la reproducción de las plantas con las que interactúa.',
+                'patterns' => ['poliniz', 'pollinat', 'nectarivor', 'nectarívor', 'feeds on nectar', 'flower visitor'],
+                'name' => 'Polinizador / Nectarívoro',
+                'description' => 'Transporta polen entre flores o se alimenta de néctar, favoreciendo la reproducción de las plantas con las que interactúa.',
             ],
             [
-                'patterns' => ['dispersión de semillas', 'dispersor de semillas', 'seed dispers'],
-                'name' => 'Dispersor de semillas',
-                'description' => 'Transporta semillas y puede favorecer la regeneración de las plantas con las que interactúa.',
+                'patterns' => ['dispersión de semillas', 'dispersor de semillas', 'seed dispers', 'frugivor', 'frugívor', 'fruit-eating', 'feeds on fruit'],
+                'name' => 'Dispersor de semillas / Frugívoro',
+                'description' => 'Consume frutos y transporta semillas a nuevas áreas, favoreciendo la regeneración y diversidad del bosque.',
             ],
             [
-                'patterns' => ['descompon', 'decompos', 'saprotroph', 'saprob'],
-                'name' => 'Descomponedor',
-                'description' => 'Participa en la descomposición de materia orgánica y en el retorno de nutrientes al ambiente.',
+                'patterns' => ['descompon', 'decompos', 'saprotroph', 'saprob', 'detritivor', 'detritívor'],
+                'name' => 'Descomponedor / Detritívoro',
+                'description' => 'Participa en la descomposición de materia orgánica y en el reciclaje y retorno de nutrientes al suelo y ambiente.',
             ],
             [
-                'patterns' => ['preys on', 'feeds on insects', 'insectivor', 'depredador', 'predator', 'predation'],
-                'name' => 'Regulador de poblaciones',
-                'description' => 'Al consumir otros organismos, puede contribuir a regular sus poblaciones y a mantener el equilibrio de la red alimentaria.',
+                'patterns' => ['preys on', 'feeds on insects', 'insectivor', 'insectívor', 'depredador', 'predator', 'predation', 'carnivor', 'carnívor'],
+                'name' => 'Regulador de poblaciones / Depredador',
+                'description' => 'Al consumir otros organismos, regula sus poblaciones y ayuda a mantener el equilibrio natural de la red trófica.',
+            ],
+            [
+                'patterns' => ['piscivor', 'piscívor', 'feeds on fish', 'preys on fish'],
+                'name' => 'Piscívoro / Depredador acuático',
+                'description' => 'Se alimenta de peces y organismos acuáticos, transfiriendo energía entre ecosistemas acuáticos y terrestres.',
+            ],
+            [
+                'patterns' => ['herbivor', 'herbívor', 'folivor', 'folívor', 'grazer', 'feeds on plants', 'feeds on leaves'],
+                'name' => 'Herbívoro / Consumidor primario',
+                'description' => 'Consume materia vegetal, convirtiendo la energía de los productores primarios en biomasa accesible para otros niveles tróficos.',
+            ],
+            [
+                'patterns' => ['omnivor', 'omnívor', 'generalist feeder'],
+                'name' => 'Omnívoro adaptativo',
+                'description' => 'Consume una amplia variedad de alimentos vegetales y animales, conectando múltiples vías en la red alimentaria.',
+            ],
+            [
+                'patterns' => ['granivor', 'granívor', 'seed eater', 'feeds on seeds'],
+                'name' => 'Granívoro',
+                'description' => 'Se alimenta de semillas de plantas, influyendo en la dinámica de reclutamiento y abundancia de especies vegetales.',
             ],
             [
                 'patterns' => ['fixes nitrogen', 'nitrogen fixation', 'fijación de nitrógeno', 'fija nitrógeno'],
@@ -225,7 +245,12 @@ class EolService extends BaseApiService
             [
                 'patterns' => ['bioindicator', 'bioindicador', 'indicator species', 'especie indicadora'],
                 'name' => 'Indicador ambiental',
-                'description' => 'Su presencia, ausencia o abundancia puede aportar información sobre el estado y los cambios del ambiente.',
+                'description' => 'Su presencia, ausencia o abundancia aporta información sobre el estado ecológico y la salud del ecosistema.',
+            ],
+            [
+                'patterns' => ['photosynthe', 'primary producer', 'productor primario', 'fotosíntesis', 'epiphyte', 'epifita', 'tree', 'árbol', 'arbusto', 'planta'],
+                'name' => 'Productor primario / Soporte de hábitat',
+                'description' => 'Genera biomasa y oxígeno a través de la fotosíntesis, sirviendo de base trófica, refugio y microhábitat para la biodiversidad.',
             ],
         ];
 

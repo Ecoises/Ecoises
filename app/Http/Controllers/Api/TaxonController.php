@@ -150,17 +150,22 @@ class TaxonController extends Controller
 
         // ← Fix: Usa $data y maneja si no es modelo
         $taxon = $result['data'];
-        $taxon->loadMissing('apiReferences');
+        $taxon->load('apiReferences');
 
         $eolReference = $taxon->apiReferences->firstWhere('api_source', 'eol');
         $ecologyIsStale = !$eolReference
-            || (int) data_get($eolReference->data, 'schema_version', 0) < 2
             || !$eolReference->last_verified_at
             || $eolReference->last_verified_at->lt(now()->subMonths(6));
 
-        // La consulta externa ocurre después de responder y nunca retrasa la ficha.
+        // Enriquecer sincrónicamente para que el usuario reciba la información de inmediato
         if ($ecologyIsStale) {
-            EnrichSpeciesEcologyJob::dispatchAfterResponse($taxon->id);
+            try {
+                app(\App\Jobs\EnrichSpeciesEcologyJob::class, ['taxonId' => $taxon->id])
+                    ->handle(app(\App\Services\Api\EolService::class));
+                $taxon->load('apiReferences');
+            } catch (\Throwable $e) {
+                Log::warning("Error enriqueciendo ecología para taxón {$taxon->id}: " . $e->getMessage());
+            }
         }
 
         $data = $shouldEnrich ? $taxon->enriched_data : $taxon;
