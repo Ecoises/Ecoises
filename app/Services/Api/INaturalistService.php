@@ -6,6 +6,9 @@ use App\Services\ConservationStatusResolver;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 
@@ -81,14 +84,22 @@ class INaturalistService extends BaseApiService
             'params' => $defaultParams
         ]);
 
-        $response = $this->makeRequest('get', "/taxa/{$id}", $defaultParams);
-        
-        if (!$response['success']) {
-            return $response;
+        // El dominio web oficial usa una ruta de red distinta y es más estable en
+        // entornos donde api.inaturalist.org no tiene conectividad.
+        $fallback = $this->getTaxonFromWebsite($id, $defaultParams['locale'] ?? 'es');
+
+        if ($fallback['success']) {
+            $taxonData = $fallback['data'];
+            $response = $fallback;
+        } else {
+            $response = $this->makeRequest('get', "/taxa/{$id}", $defaultParams);
+
+            if (!$response['success']) {
+                return $response;
+            }
+
+            $taxonData = $response['data']['results'][0] ?? null;
         }
-        
-        // Procesar la respuesta
-        $taxonData = $response['data']['results'][0] ?? null;
         
         if (!is_array($taxonData)) {
             return [
@@ -122,7 +133,51 @@ class INaturalistService extends BaseApiService
             'data' => $normalizedTaxon,
             'cached' => $response['cached'] ?? false,
             'api' => $this->apiName,
+            'source' => $response['source'] ?? 'api',
         ];
+    }
+
+    /**
+     * Ficha oficial alternativa para redes donde api.inaturalist.org no responde.
+     */
+    protected function getTaxonFromWebsite(string $id, string $locale = 'es'): array
+    {
+        try {
+            $response = Http::withHeaders($this->getDefaultHeaders())
+                ->connectTimeout(5)
+                ->timeout(15)
+                ->get("https://www.inaturalist.org/taxa/{$id}.json", ['locale' => $locale]);
+
+            $response->throw();
+            $data = $response->json();
+
+            if (!is_array($data) || empty($data['id'])) {
+                return ['success' => false];
+            }
+
+            // Este endpoint no aplica correctamente preferred_place_id. No elegimos
+            // un nombre español genérico porque podría pertenecer a otro país.
+            unset($data['common_name'], $data['preferred_common_name']);
+
+            Log::warning('Usando ficha alternativa oficial de iNaturalist', [
+                'taxon_id' => $id,
+                'host' => 'www.inaturalist.org',
+            ]);
+
+            return [
+                'success' => true,
+                'data' => $data,
+                'cached' => false,
+                'source' => 'inaturalist_website_fallback',
+            ];
+        } catch (RequestException|ConnectionException $e) {
+            Log::error('También falló la ficha alternativa de iNaturalist', [
+                'taxon_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return ['success' => false];
+        }
     }
     /**
      * Obtiene múltiples taxones por sus IDs (Bulk)
@@ -840,9 +895,9 @@ class INaturalistService extends BaseApiService
 
             $gallery[] = [
                 'id' => $photo['id'] ?? null,
-                'url' => $photo['original_url'] ?? $photo['large_url'] ?? $photo['medium_url'] ?? $photo['url'],
-                'medium_url' => $photo['medium_url'] ?? $photo['url'],
-                'small_url' => $photo['small_url'] ?? $photo['square_url'] ?? $photo['url'],
+                'url' => $photo['original_url'] ?? $photo['large_url'] ?? $photo['medium_url'] ?? $photo['url'] ?? null,
+                'medium_url' => $photo['medium_url'] ?? $photo['url'] ?? null,
+                'small_url' => $photo['small_url'] ?? $photo['square_url'] ?? $photo['url'] ?? null,
                 'attribution' => $photo['attribution'] ?? null,
                 'license_code' => $photo['license_code'] ?? null,
                 'original_dimensions' => $photo['original_dimensions'] ?? null,

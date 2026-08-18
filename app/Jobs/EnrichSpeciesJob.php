@@ -93,6 +93,12 @@ class EnrichSpeciesJob implements ShouldQueue, ShouldBeUnique
             }
 
             $canonical = $mergedData['data'];
+            $colombianCommonName = null;
+            if (!empty($canonical['gbifTaxonKey'])) {
+                $colombianCommonName = $gbif
+                    ->getColombianVernacularNamesBatch([$canonical['gbifTaxonKey']])
+                    [(string) $canonical['gbifTaxonKey']] ?? null;
+            }
 
             $resolvedName = $canonical['scientificName'] ?? $cleanName;
 
@@ -105,7 +111,8 @@ class EnrichSpeciesJob implements ShouldQueue, ShouldBeUnique
             // 3. Actualizar Taxa con datos normalizados
             $taxon->update([
                 'scientific_name' => $finalName,
-                'common_name' => $canonical['commonName'] ?? null,
+                'common_name' => $colombianCommonName
+                    ?: ($taxon->common_name ?: ($canonical['commonName'] ?? null)),
                 'kingdom' => $canonical['kingdom'] ?? null,
                 'phylum' => $canonical['phylum'] ?? null,
                 'class' => $canonical['class'] ?? null,
@@ -159,35 +166,48 @@ class EnrichSpeciesJob implements ShouldQueue, ShouldBeUnique
      */
     protected function storeApiReferences(Taxa $taxon, array $canonical): void
     {
-        // Limpiar referencias previas (por si es un reprocess)
-        $taxon->apiReferences()->delete();
-
         // GBIF
         if ($canonical['gbifData'] ?? null) {
-            TaxonApiReference::create([
-                'taxon_id' => $taxon->id,
-                'api_source' => 'gbif',
-                'external_id' => $canonical['gbifTaxonKey'],
-                'api_url' => "https://www.gbif.org/species/{$canonical['gbifTaxonKey']}",
-                'confidence_score' => $canonical['gbifConfidence'] ?? 1.0,
-                'is_primary' => true,
-                'last_verified_at' => now(),
-                'data' => $canonical['gbifData'],
-            ]);
+            TaxonApiReference::updateOrCreate(
+                ['taxon_id' => $taxon->id, 'api_source' => 'gbif'],
+                [
+                    'external_id' => $canonical['gbifTaxonKey'],
+                    'api_url' => "https://www.gbif.org/species/{$canonical['gbifTaxonKey']}",
+                    'confidence_score' => $canonical['gbifConfidence'] ?? 1.0,
+                    'is_primary' => true,
+                    'last_verified_at' => now(),
+                    'data' => $canonical['gbifData'],
+                ]
+            );
         }
 
         // iNaturalist
         if ($canonical['inatData'] ?? null) {
-            TaxonApiReference::create([
-                'taxon_id' => $taxon->id,
-                'api_source' => 'inaturalist',
-                'external_id' => $canonical['inatTaxonId'],
-                'api_url' => "https://www.inaturalist.org/taxa/{$canonical['inatTaxonId']}",
-                'confidence_score' => $canonical['inatConfidence'] ?? 1.0,
-                'is_primary' => false,
-                'last_verified_at' => now(),
-                'data' => $canonical['inatData'],
-            ]);
+            $existing = $taxon->apiReferences()
+                ->where('api_source', 'inaturalist')
+                ->first();
+            $incomingData = $canonical['inatData'];
+            $existingData = $existing?->data ?? [];
+            $existingIsRich = !empty($existingData['gallery'])
+                || !empty($existingData['taxon_photos'])
+                || !empty($existingData['wikipedia_summary']);
+            $incomingIsRich = !empty($incomingData['gallery'])
+                || !empty($incomingData['taxon_photos'])
+                || !empty($incomingData['wikipedia_summary']);
+
+            TaxonApiReference::updateOrCreate(
+                ['taxon_id' => $taxon->id, 'api_source' => 'inaturalist'],
+                [
+                    'external_id' => $canonical['inatTaxonId'],
+                    'api_url' => "https://www.inaturalist.org/taxa/{$canonical['inatTaxonId']}",
+                    'confidence_score' => $canonical['inatConfidence'] ?? 1.0,
+                    'is_primary' => false,
+                    'last_verified_at' => now(),
+                    'data' => $existingIsRich && !$incomingIsRich ? $existingData : $incomingData,
+                ]
+            );
         }
+
+        EnrichSpeciesEcologyJob::dispatch($taxon->id)->delay(now()->addSeconds(2));
     }
 }

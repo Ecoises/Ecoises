@@ -297,6 +297,123 @@ class GbifService extends BaseApiService
     }
 
     /**
+     * Obtiene en paralelo los nombres vernáculos respaldados por fuentes colombianas.
+     *
+     * @return array<string, string>
+     */
+    public function getColombianVernacularNamesBatch(array $speciesKeys): array
+    {
+        $names = [];
+        $missing = [];
+        $params = ['limit' => 100];
+        $keys = array_values(array_unique(array_map('strval', $speciesKeys)));
+        $cacheKeysBySpecies = [];
+
+        foreach ($keys as $key) {
+            $endpoint = "/species/{$key}/vernacularNames";
+            $cacheKeysBySpecies[$key] = $this->generateCacheKey('get', $endpoint, $params);
+        }
+
+        $cachedRows = UnifiedApiCache::query()
+            ->whereIn('cache_key', array_values($cacheKeysBySpecies))
+            ->where('expires_at', '>', now())
+            ->get()
+            ->keyBy('cache_key');
+
+        foreach ($cacheKeysBySpecies as $key => $cacheKey) {
+            $cached = $cachedRows->get($cacheKey);
+            if (!$cached) {
+                $missing[] = $key;
+                continue;
+            }
+
+            $name = $this->selectColombianVernacularName($cached->response_data['results'] ?? []);
+            if ($name) {
+                $names[$key] = $name;
+            }
+        }
+
+        if ($missing === []) {
+            return $names;
+        }
+
+        $baseUrl = rtrim($this->config['base_url'], '/');
+        $timeout = (int) ($this->config['timeout'] ?? 30);
+        $responses = Http::pool(function (Pool $pool) use ($missing, $baseUrl, $timeout, $params) {
+            return array_map(
+                fn (string $key) => $pool
+                    ->as($key)
+                    ->withHeaders($this->getDefaultHeaders())
+                    ->connectTimeout(5)
+                    ->timeout($timeout)
+                    ->get("{$baseUrl}/species/{$key}/vernacularNames", $params),
+                $missing
+            );
+        });
+
+        foreach ($missing as $key) {
+            $response = $responses[$key] ?? null;
+            if (!$response instanceof Response || !$response->successful()) {
+                continue;
+            }
+
+            $data = $response->json();
+            if (!is_array($data)) {
+                continue;
+            }
+
+            $endpoint = "/species/{$key}/vernacularNames";
+            $cacheKey = $this->generateCacheKey('get', $endpoint, $params);
+            $this->saveToCache($cacheKey, $endpoint, $data, null, $params);
+
+            $name = $this->selectColombianVernacularName($data['results'] ?? []);
+            if ($name) {
+                $names[$key] = $name;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Prioriza español + país CO, luego áreas CO y finalmente fuentes colombianas.
+     */
+    protected function selectColombianVernacularName(array $records): ?string
+    {
+        return collect($records)
+            ->map(function (array $record): ?array {
+                $name = trim((string) ($record['vernacularName'] ?? ''));
+                $language = strtolower((string) ($record['language'] ?? ''));
+                $country = strtoupper((string) ($record['country'] ?? ''));
+                $area = strtoupper((string) ($record['area'] ?? ''));
+                $source = strtolower((string) ($record['source'] ?? ''));
+                $isSpanish = in_array($language, ['spa', 'es', 'spanish'], true);
+                $hasNoLanguage = $language === '';
+                $countryMatch = $country === 'CO';
+                $areaMatch = str_contains($area, 'CO:');
+                $sourceMatch = str_contains($source, 'colombia');
+
+                if ($name === '' || (!$isSpanish && !$hasNoLanguage)) {
+                    return null;
+                }
+
+                if (!$countryMatch && !$areaMatch && !$sourceMatch) {
+                    return null;
+                }
+
+                $regionalScore = $countryMatch ? 0 : ($areaMatch ? 1 : 2);
+
+                return [
+                    'name' => $name,
+                    'score' => ($isSpanish ? 0 : 10) + $regionalScore,
+                ];
+            })
+            ->filter()
+            ->sortBy('score')
+            ->value('name');
+    }
+
+    /**
      * Busca taxones por nombre científico
      */
     public function searchTaxon(string $scientificName): array

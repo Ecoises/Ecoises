@@ -50,6 +50,12 @@ return [
         'preferred_place_id' => (int) env('INATURALIST_PREFERRED_PLACE_ID', 7196), // Colombia
     ],
 
+    'eol' => [
+        'base_url' => env('EOL_BASE_URL', 'https://eol.org/api'),
+        'timeout' => (int) env('EOL_TIMEOUT', 30),
+        'cache_ttl' => (int) env('EOL_CACHE_TTL', 43200),
+    ],
+
     'wikipedia' => [
         'base_url' => env('WIKIPEDIA_BASE_URL', 'https://es.wikipedia.org/api/rest_v1'),
         'timeout' => (int) env('WIKIPEDIA_TIMEOUT', 15),

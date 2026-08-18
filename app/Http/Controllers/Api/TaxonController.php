@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\EnrichSpeciesEcologyJob;
 use App\Services\TaxonService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -134,16 +135,35 @@ class TaxonController extends Controller
         $result = $this->taxonService->getTaxonById($id, $forceRefresh);
         
         if (!$result['success']) {
+            $status = (int) ($result['error']['code'] ?? 502);
+            if ($status < 400 || $status > 599) {
+                $status = 502;
+            }
+
             return response()->json([
                 'success' => false,
                 'message' => $result['error']['message'] ?? 'Error al obtener el taxón',
-                'code' => $result['error']['code'] ?? 404,
+                'code' => $status,
                 'data' => null,
-            ], $result['error']['code'] ?? 404);
+            ], $status);
         }
 
         // ← Fix: Usa $data y maneja si no es modelo
-        $data = $shouldEnrich ? $result['data']->enriched_data : $result['data'];
+        $taxon = $result['data'];
+        $taxon->loadMissing('apiReferences');
+
+        $eolReference = $taxon->apiReferences->firstWhere('api_source', 'eol');
+        $ecologyIsStale = !$eolReference
+            || (int) data_get($eolReference->data, 'schema_version', 0) < 2
+            || !$eolReference->last_verified_at
+            || $eolReference->last_verified_at->lt(now()->subMonths(6));
+
+        // La consulta externa ocurre después de responder y nunca retrasa la ficha.
+        if ($ecologyIsStale) {
+            EnrichSpeciesEcologyJob::dispatchAfterResponse($taxon->id);
+        }
+
+        $data = $shouldEnrich ? $taxon->enriched_data : $taxon;
         
         return response()->json([
             'success' => true,

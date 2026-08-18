@@ -103,8 +103,9 @@ class ExplorerService
         $pageBuckets = $buckets->slice(($page - 1) * $perPage, $perPage)->values();
         $pageKeys = $pageBuckets->pluck('species_key')->map(fn ($key) => (string) $key)->all();
         $detailsByKey = $this->gbif->getSpeciesDetailsBatch($pageKeys);
+        $colombianNamesByKey = $this->gbif->getColombianVernacularNamesBatch($pageKeys);
 
-        [$keyToId, $toEnrich] = $this->persistPageTaxa($pageBuckets, $detailsByKey);
+        [$keyToId, $toEnrich] = $this->persistPageTaxa($pageBuckets, $detailsByKey, $colombianNamesByKey);
         $taxaById = Taxa::with('apiReferences')
             ->whereIn('id', array_values($keyToId))
             ->get()
@@ -200,7 +201,11 @@ class ExplorerService
     /**
      * @return array{0: array<string, int>, 1: array<int, string>}
      */
-    private function persistPageTaxa(Collection $pageBuckets, array $detailsByKey): array
+    private function persistPageTaxa(
+        Collection $pageBuckets,
+        array $detailsByKey,
+        array $colombianNamesByKey = []
+    ): array
     {
         $keyToId = [];
         $toEnrich = [];
@@ -233,6 +238,9 @@ class ExplorerService
                 );
 
             $updates = ['gbif_taxon_key' => $speciesKey];
+            if (!empty($colombianNamesByKey[$speciesKey])) {
+                $updates['common_name'] = $colombianNamesByKey[$speciesKey];
+            }
             foreach ([
                 'kingdom' => 'kingdom',
                 'phylum' => 'phylum',

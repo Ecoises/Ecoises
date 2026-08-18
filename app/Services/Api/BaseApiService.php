@@ -5,6 +5,7 @@ namespace App\Services\Api;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
 use App\Models\UnifiedApiCache;
 use Carbon\Carbon;
@@ -74,6 +75,7 @@ abstract class BaseApiService implements ApiServiceInterface
             $url = rtrim($this->config['base_url'], '/') . '/' . ltrim($endpoint, '/');
             
             $response = Http::withHeaders($this->getDefaultHeaders())
+                ->connectTimeout($this->config['connect_timeout'] ?? 5)
                 ->timeout($this->config['timeout'] ?? 30)
                 ->$method($url, $method === 'get' ? $params : []);
                 
@@ -94,7 +96,7 @@ abstract class BaseApiService implements ApiServiceInterface
                 'endpoint' => $endpoint,
             ];
             
-        } catch (RequestException $e) {
+        } catch (RequestException|ConnectionException $e) {
             Log::error("Error en la petición a {$this->apiName} - {$endpoint}", [
                 'message' => $e->getMessage(),
                 'code' => $e->getCode(),

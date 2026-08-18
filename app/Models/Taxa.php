@@ -92,6 +92,7 @@ class Taxa extends Model
     // Usamos la propiedad (colección eager loaded) en vez del método (query)
     // para aprovechar el eager loading del Service
     $ref = $this->apiReferences->firstWhere('api_source', 'inaturalist');
+    $eolRef = $this->apiReferences->firstWhere('api_source', 'eol');
     if ($ref && $ref->data) {
         $apiData = $ref->data;
         $enriched = array_merge($enriched, [
@@ -121,6 +122,7 @@ class Taxa extends Model
     $enriched['local_records_count'] = $enriched['local_records_count'] ?? 0;
     $enriched['attribution']         = $enriched['attribution'] ?? null;
     $enriched['inaturalist_id']      = $ref && is_numeric($ref->external_id) ? (int)$ref->external_id : ($ref->external_id ?? null);
+    $enriched['ecology_profile']     = $eolRef?->data;
 
     return $enriched;
 }

@@ -108,4 +108,23 @@ class GbifNearbySearchTest extends TestCase
         $this->assertArrayNotHasKey('geoDistance', $service->capturedParams);
         $this->assertSame('10', $result['data']['buckets'][0]['species_key']);
     }
+
+    public function test_it_prioritizes_a_spanish_name_documented_in_colombia(): void
+    {
+        $service = new class extends GbifService {
+            public function selectName(array $records): ?string
+            {
+                return $this->selectColombianVernacularName($records);
+            }
+        };
+
+        $name = $service->selectName([
+            ['vernacularName' => 'Hocó oscuro', 'language' => 'spa'],
+            ['vernacularName' => 'Garza Tigre Barreteada', 'language' => 'spa', 'country' => 'EC'],
+            ['vernacularName' => 'Vaco Cabecinegro', 'language' => '', 'area' => 'CO:05756 | CO:05652'],
+            ['vernacularName' => 'Garza tigre de río', 'language' => 'spa', 'source' => 'Inventario de aves de Colombia'],
+        ]);
+
+        $this->assertSame('Garza tigre de río', $name);
+    }
 }

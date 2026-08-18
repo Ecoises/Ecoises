@@ -190,8 +190,9 @@ class TaxonService
     {
         $localTaxon = null;
 
-        // Si no se fuerza la actualización, buscamos primero en la base de datos local
-        if (!$forceRefresh) {
+        // El ID de la ruta siempre es local. Incluso al forzar una actualización
+        // primero debemos resolver el registro local y su ID externo real.
+        {
             // 1. Intentar por ID Local (PK)
             $localTaxon = Taxa::with(['apiReferences'])->find($id);
 
@@ -221,13 +222,16 @@ class TaxonService
                 $enrichedData = $localTaxon->enriched_data;
                 
                 $hasGallery = !empty($enrichedData['gallery']);
-                $hasAncestors = !empty($enrichedData['ancestors']); // Clave para taxonomía completa
+                $hasAncestors = !empty($enrichedData['ancestors']);
+                $hasLocalTaxonomy = !empty($localTaxon->kingdom)
+                    && !empty($localTaxon->family)
+                    && !empty($localTaxon->genus);
                 $hasSummary = !empty($enrichedData['wikipedia_summary']);
 
                 // CRITERIO DE COMPLETITUD:
                 // Debe tener Ancestros (info taxonómica) Y (Galería O Resumen).
                 // Si falta info taxonómica O (falta foto y falta texto), consideramos incompleto.
-                $isComplete = $hasAncestors && ($hasGallery || $hasSummary);
+                $isComplete = ($hasAncestors || $hasLocalTaxonomy) && ($hasGallery || $hasSummary);
 
                 Log::info('🧐 Verificando completitud de taxón local', [
                     'id' => $localTaxon->id, // Usar ID real del objeto
@@ -235,12 +239,13 @@ class TaxonService
                     'has_gallery' => $hasGallery, 
                     'gallery_count' => count($enrichedData['gallery'] ?? []),
                     'has_ancestors' => $hasAncestors,
+                    'has_local_taxonomy' => $hasLocalTaxonomy,
                     'has_summary' => $hasSummary,
                     'is_complete' => $isComplete
                 ]);
 
                 // Si parece completo, devolvemos la data local.
-                if ($isComplete) {
+                if (!$forceRefresh && $isComplete) {
                     return [
                         'success' => true,
                         'data' => $localTaxon,
@@ -267,7 +272,7 @@ class TaxonService
         
         if (isset($localTaxon) && $localTaxon) {
             $ref = $localTaxon->apiReferences->firstWhere('api_source', 'inaturalist');
-            $externalId = $ref ? $ref->external_id : null;
+            $externalId = $ref?->external_id ?: $localTaxon->inat_taxon_id;
         }
 
         // Si no tenemos external ID (caso raro o primer acceso si lógica fuera mixta),
@@ -498,62 +503,40 @@ class TaxonService
      */
     public function getRelatedSpecies(int $taxonId): array
     {
-        // 1. Obtener el taxón base para saber su género
-        $baseTaxon = $this->getTaxonById($taxonId);
-        
-        if (!$baseTaxon['success']) {
+        $baseTaxon = Taxa::with('apiReferences')->find($taxonId);
+
+        if (!$baseTaxon) {
             return ['success' => false, 'error' => 'Taxón base no encontrado'];
         }
 
-        $taxonData = $baseTaxon['data']->enriched_data ?? $baseTaxon['data'];
-        
-        // 2. Extraer ID del ancestro (Género o Familia)
-        // Intentamos buscar el género en el ancestry
-        $ancestors = $taxonData['ancestors'] ?? [];
-        $genusId = null;
-        
-        foreach ($ancestors as $ancestor) {
-            if (isset($ancestor['rank']) && $ancestor['rank'] === 'genus') {
-                $genusId = $ancestor['id'];
-                break;
-            }
-        }
-        
-        // Si no encontramos género, usar familia o fallback
-        if (!$genusId && !empty($ancestors)) {
-            // Usar el ancestro inmediato anterior (padre)
-            $parent = end($ancestors);
-            $genusId = $parent['id'] ?? null;
+        $related = collect();
+
+        if ($baseTaxon->genus) {
+            $related = Taxa::with('apiReferences')
+                ->where('genus', $baseTaxon->genus)
+                ->whereKeyNot($baseTaxon->id)
+                ->orderByDesc('observation_count')
+                ->limit(3)
+                ->get();
         }
 
-        if (!$genusId) {
-            return ['success' => false, 'data' => []];
+        // Completar con especies de la misma familia cuando el género no alcanza tres resultados.
+        if ($related->count() < 3 && $baseTaxon->family) {
+            $familyRelated = Taxa::with('apiReferences')
+                ->where('family', $baseTaxon->family)
+                ->whereKeyNot($baseTaxon->id)
+                ->whereNotIn('id', $related->pluck('id'))
+                ->orderByDesc('observation_count')
+                ->limit(3 - $related->count())
+                ->get();
+
+            $related = $related->concat($familyRelated);
         }
-
-        // 3. Buscar especies hermanas en iNaturalist
-        $params = [
-            'taxon_id' => $genusId, // Buscar dentro de este ancestro
-            'rank' => 'species',
-            'per_page' => 4, // 3 + 1 (por si sale el mismo)
-            'order_by' => 'observations_count',
-            'order' => 'desc',
-            'photos' => 'true', 
-        ];
-
-        $relatedResult = $this->iNaturalistService->searchTaxon('', $params);
-        
-        if (!$relatedResult['success']) {
-            return ['success' => false, 'data' => []];
-        }
-
-        // 4. Filtrar el taxón actual de los resultados
-        $relatedTaxa = array_filter($relatedResult['data'], function($t) use ($taxonId) {
-            return $t['id'] != $taxonId;
-        });
 
         return [
             'success' => true,
-            'data' => array_values(array_slice($relatedTaxa, 0, 3))
+            'data' => $related->values()->all(),
+            'source' => 'local_taxonomy',
         ];
     }
     
@@ -665,24 +648,37 @@ class TaxonService
             DB::beginTransaction();
 
             $taxon = Taxa::where('scientific_name', $scientificName)->first() ?? new Taxa(['scientific_name' => $scientificName]);
-            $taxon->common_name = $taxonData['preferred_common_name'] ?? $this->getCommonNameFromApi($taxonData);
+            $commonName = $taxonData['preferred_common_name'] ?? $this->getCommonNameFromApi($taxonData);
+            // El nombre del catálogo local es canónico. iNaturalist solo completa
+            // este campo cuando todavía no tenemos un nombre común registrado.
+            if ($commonName && empty($taxon->common_name)) {
+                $taxon->common_name = $commonName;
+            }
 
             // Ancestry (por ahora nulls; IDs en enriched_data)
             $ancestry = $this->extractAncestryFromApi($taxonData);
-            $taxon->kingdom = $ancestry['kingdom'] ?? null;
-            $taxon->phylum = $ancestry['phylum'] ?? null;
-            $taxon->class = $ancestry['class'] ?? null;
-            $taxon->order_name = $ancestry['order'] ?? null;
-            $taxon->family = $ancestry['family'] ?? null;
-            $taxon->genus = $ancestry['genus'] ?? null;
-            $taxon->species = $ancestry['species'] ?? null;
+            foreach ([
+                'kingdom' => 'kingdom',
+                'phylum' => 'phylum',
+                'class' => 'class',
+                'order' => 'order_name',
+                'family' => 'family',
+                'genus' => 'genus',
+                'species' => 'species',
+            ] as $source => $attribute) {
+                if (!empty($ancestry[$source])) {
+                    $taxon->{$attribute} = $ancestry[$source];
+                }
+            }
 
             // Determinar status de establecimiento usando el extractor robusto
             // (incluye preferred_establishment_means, establishment_means, listed_taxa y flags booleanos)
             $flags = $this->extractEstablishmentStatusFromApiData($taxonData);
-            $taxon->is_native = $flags['is_native'];
-            $taxon->is_endemic = $flags['is_endemic'];
-            $taxon->is_introduced = $flags['is_introduced'] ?? false;
+            if (($flags['status'] ?? 'unknown') !== 'unknown') {
+                $taxon->is_native = $flags['is_native'];
+                $taxon->is_endemic = $flags['is_endemic'];
+                $taxon->is_introduced = $flags['is_introduced'] ?? false;
+            }
 
             $conservation = $this->conservationStatusResolver->resolve(
                 $taxonData['conservation_statuses'] ?? $taxonData['conservation_status'] ?? null,
@@ -696,7 +692,8 @@ class TaxonService
                 $taxon->conservation_status_scope = $conservation['scope'];
                 $taxon->conservation_status_authority = $conservation['authority'];
                 $taxon->conservation_status_url = $conservation['url'];
-            } elseif ($taxon->conservation_status === 'NE' || $taxon->conservation_status_source === 'inaturalist') {
+            } elseif (array_key_exists('conservation_status', $taxonData)
+                && ($taxon->conservation_status === 'NE' || $taxon->conservation_status_source === 'inaturalist')) {
                 // iNaturalist sin evaluación no equivale a la categoría formal NE.
                 $taxon->conservation_status = null;
                 $taxon->conservation_status_source = 'inaturalist';
@@ -706,7 +703,10 @@ class TaxonService
             } elseif ($taxon->conservation_status && !$taxon->conservation_status_source) {
                 $taxon->conservation_status_source = 'legacy';
             }
-            $taxon->observation_count = ($taxon->observation_count ?? 0) + ($taxonData['observations_count'] ?? 0);
+            $taxon->observation_count = max(
+                (int) ($taxon->observation_count ?? 0),
+                (int) ($taxonData['observations_count'] ?? 0)
+            );
             $taxon->last_observed_at = now();
             $taxon->save();
 
