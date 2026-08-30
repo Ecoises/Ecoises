@@ -5,15 +5,13 @@ namespace App\Filament\Resources\EducationalContents\Schemas;
 use App\Models\EducationalContent;
 use App\Models\Lesson; // Ensure Lesson model exists and has estimateReadingTime if used
 use App\Services\ElevenLabsService;
-use App\Services\GeminiAudioService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Hidden;
-use Filament\Forms\Components\KeyValue;
+use Filament\Forms\Components\MarkdownEditor;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\RichEditor;
-use Filament\Forms\Components\MarkdownEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
@@ -32,13 +30,25 @@ use Filament\Schemas\Schema;
 use Hugomyb\FilamentMediaAction\Actions\MediaAction;
 use Illuminate\Support\Str;
 
-
 class EducationalContentForm
 {
     public static function configure(Schema $schema): Schema
     {
         return $schema
             ->components([
+                Section::make('Borrador protegido')
+                    ->description(fn ($livewire): string => filled($livewire->lastAutosavedAt ?? null)
+                        ? "Último guardado automático: {$livewire->lastAutosavedAt}. Puedes cerrar esta página y continuar después."
+                        : 'Tus cambios se guardan automáticamente en la base de datos cada 10 segundos.')
+                    ->icon('heroicon-o-cloud-arrow-up')
+                    ->schema([])
+                    ->visible(fn (string $operation, ?EducationalContent $record): bool => $operation === 'edit' && $record?->status === EducationalContent::STATUS_DRAFT
+                    )
+                    ->extraAttributes([
+                        'x-data' => '{}',
+                        'x-init' => 'const autosaveTimer = setInterval(() => $wire.autosaveDraft(), 10000); $cleanup(() => clearInterval(autosaveTimer))',
+                    ]),
+
                 Wizard::make([
                     /*───────────────────────────────
                      | PASO 1 — INFORMACIÓN GENERAL
@@ -51,7 +61,7 @@ class EducationalContentForm
                                         ->label('Título del contenido')
                                         ->required()
                                         ->maxLength(255)
-                                        ->live(onBlur: true)
+                                        ->live(debounce: 1500)
                                         ->afterStateUpdated(fn ($state, Set $set) => $set('slug', Str::slug($state))),
 
                                     TextInput::make('slug')
@@ -66,7 +76,8 @@ class EducationalContentForm
                                     MarkdownEditor::make('description')
                                         ->label('Breve descripción')
                                         ->minHeight('50px') // Por defecto suele ser 300px o más
-                                        ->maxHeight('60px'),
+                                        ->maxHeight('60px')
+                                        ->live(debounce: 2500),
                                 ])
                                 ->columnSpan(2),
 
@@ -103,7 +114,9 @@ class EducationalContentForm
                                         ->required()
                                         ->native(false)
                                         ->live()
-                                        ->disabled(fn (string $operation): bool => $operation === 'edit'),
+                                        // Los nuevos contenidos entran al editor como un borrador
+                                        // persistente, por lo que el tipo debe poder elegirse allí.
+                                        ->disabled(fn (?EducationalContent $record): bool => $record?->status !== EducationalContent::STATUS_DRAFT),
 
                                     Select::make('categories')
                                         ->relationship('categories', 'name')
@@ -126,8 +139,6 @@ class EducationalContentForm
                                         ->label('Etiquetas')
                                         ->separator(','),
 
-                                    
-
                                     // Detalles de Curso
                                     TextInput::make('course_details.completion_points')
                                         ->label('Puntos por completar')
@@ -136,17 +147,14 @@ class EducationalContentForm
                                         ->default(100),
 
                                     TextInput::make('article_details.read_time')
-                                    ->label('Tiempo de lectura (min)')
-                                    ->numeric()
-                                    ->prefix('aprox.')
-                                    ->suffix('minutos')
-                                    ->readonly()
-                                    ->visible(fn (Get $get) => $get('content_type') === 'article')
-                                    ->live(),
-                                        
-                                    
+                                        ->label('Tiempo de lectura (min)')
+                                        ->numeric()
+                                        ->prefix('aprox.')
+                                        ->suffix('minutos')
+                                        ->readonly()
+                                        ->visible(fn (Get $get) => $get('content_type') === 'article')
+                                        ->live(),
 
-                                    
                                 ])
                                 ->columnSpanFull(),
                         ])
@@ -163,6 +171,12 @@ class EducationalContentForm
                                 ->relationship('lessons')
                                 ->visible(fn (Get $get) => $get('content_type') === 'course')
                                 ->orderColumn('lesson_order')
+                                ->mutateRelationshipDataBeforeCreateUsing(
+                                    fn (array $data): ?array => self::prepareLessonForDraft($data)
+                                )
+                                ->mutateRelationshipDataBeforeSaveUsing(
+                                    fn (array $data): ?array => self::prepareLessonForDraft($data, false)
+                                )
                                 ->defaultItems(1)
                                 ->schema([
                                     TextInput::make('title')
@@ -172,76 +186,83 @@ class EducationalContentForm
                                         ->afterStateUpdated(fn (Set $set, $state) => $set('slug', Str::slug($state))),
 
                                     Hidden::make('slug'),
-                                    
+
                                     Hidden::make('estimated_duration'),
 
                                     RichEditor::make('content_text')
-                                    ->resizableImages()
-                                    ->label('Contenido de la Lección')
-                                    ->required()
-                                    ->fileAttachmentsDisk('public')
-                                    ->fileAttachmentsDirectory('content/lessons')
-                                    ->fileAttachmentsVisibility('public')
-                                    ->live(onBlur: true)
-                                    ->helperText(function (?string $state): string {
-                                        // Mantenemos tu lógica de cálculo para el texto de ayuda
-                                        $words = Str::wordCount(strip_tags($state ?? ''));
-                                        $minutes = ceil($words / 200);
+                                        ->resizableImages()
+                                        ->label('Contenido de la Lección')
+                                        ->required()
+                                        ->fileAttachmentsDisk('public')
+                                        ->fileAttachmentsDirectory('content/lessons')
+                                        ->fileAttachmentsVisibility('public')
+                                        ->live(debounce: 2500)
+                                        ->helperText(function (?string $state): string {
+                                            // Mantenemos tu lógica de cálculo para el texto de ayuda
+                                            $words = Str::wordCount(strip_tags($state ?? ''));
+                                            $minutes = ceil($words / 200);
 
-                                        return "Aquí puedes redactar el contenido educativo detallado para la lección. Estimación: {$minutes} min de lectura ({$words} palabras).";
-                                    })
-                                    ->afterStateUpdated(function (Set $set, ?string $state) {
-                                        // 1. Verificamos si hay texto, si no, ponemos 0
-                                        if (blank($state)) {
-                                            $set('estimated_duration', 0);
-                                            return;
-                                        }
+                                            return "Aquí puedes redactar el contenido educativo detallado para la lección. Estimación: {$minutes} min de lectura ({$words} palabras).";
+                                        })
+                                        ->afterStateUpdated(function (Set $set, ?string $state) {
+                                            // 1. Verificamos si hay texto, si no, ponemos 0
+                                            if (blank($state)) {
+                                                $set('estimated_duration', 0);
 
-                                        // 2. Limpiamos el HTML
-                                        $plainText = strip_tags($state);
-                                        
-                                        // 3. Contamos palabras
-                                        $words = Str::wordCount($plainText);
-                                        
-                                        // 4. Calculamos minutos (estándar 200 palabras/min)
-                                        $minutes = (int) ceil($words / 200);
-                                        
-                                        // 5. Asignamos el valor a la columna de la lección
-                                        // IMPORTANTE: Aquí cambiamos 'article_details.read_time' por 'estimated_duration'
-                                        $set('estimated_duration', max(1, $minutes));
-                                    }),
-                                    
+                                                return;
+                                            }
+
+                                            // 2. Limpiamos el HTML
+                                            $plainText = strip_tags($state);
+
+                                            // 3. Contamos palabras
+                                            $words = Str::wordCount($plainText);
+
+                                            // 4. Calculamos minutos (estándar 200 palabras/min)
+                                            $minutes = (int) ceil($words / 200);
+
+                                            // 5. Asignamos el valor a la columna de la lección
+                                            // IMPORTANTE: Aquí cambiamos 'article_details.read_time' por 'estimated_duration'
+                                            $set('estimated_duration', max(1, $minutes));
+                                        }),
+
                                     self::getAudioSectionSchema(),
 
                                     Repeater::make('references')
-                                    ->label('Bibliografía y Referencias')
-                                    ->itemLabel(function (array $state, $uuid, $component): string {
-                                        $index = array_search($uuid, array_keys($component->getState())) + 1;
-                                        
-                                        return "[{$index}] " . Str::limit($state['citation'] ?? '', 40);
-                                    })
-                                    ->schema([
-                                        Group::make([
-                                            Textarea::make('citation')
-                                                ->hiddenLabel()
-                                                ->placeholder('Pega aquí la cita bibliográfica...')
-                                                ->rows(1)
-                                                ->autosize()
-                                                ->required()
-                                                ->grow(),
-                                        ])->columns(1),
-                                    ])
-                                    ->reorderable()
-                                    ->reorderableWithButtons()
-                                    ->collapsible()
-                                    ->collapsed()
-                                    ->cloneable()
-                                    ->addActionLabel('Añadir nueva fuente')
-                                    ->defaultItems(0),
-                                        
+                                        ->label('Bibliografía y Referencias')
+                                        ->itemLabel(function (array $state, $uuid, $component): string {
+                                            $index = array_search($uuid, array_keys($component->getState())) + 1;
+
+                                            return "[{$index}] ".Str::limit($state['citation'] ?? '', 40);
+                                        })
+                                        ->schema([
+                                            Group::make([
+                                                Textarea::make('citation')
+                                                    ->hiddenLabel()
+                                                    ->placeholder('Pega aquí la cita bibliográfica...')
+                                                    ->rows(1)
+                                                    ->autosize()
+                                                    ->required()
+                                                    ->grow(),
+                                            ])->columns(1),
+                                        ])
+                                        ->reorderable()
+                                        ->reorderableWithButtons()
+                                        ->collapsible()
+                                        ->collapsed()
+                                        ->cloneable()
+                                        ->addActionLabel('Añadir nueva fuente')
+                                        ->defaultItems(0),
+
                                     Repeater::make('activities')
                                         ->relationship('activities')
                                         ->orderColumn('activity_order')
+                                        ->mutateRelationshipDataBeforeCreateUsing(
+                                            fn (array $data): ?array => self::prepareActivityForDraft($data)
+                                        )
+                                        ->mutateRelationshipDataBeforeSaveUsing(
+                                            fn (array $data): ?array => self::prepareActivityForDraft($data)
+                                        )
                                         ->schema(self::getActivitySchema())
                                         ->collapsible()
                                         ->label('Actividades interactivas')
@@ -256,7 +277,7 @@ class EducationalContentForm
                                 ->itemLabel(fn (array $state): ?string => $state['title'] ?? null),
 
                             // SECCIÓN ARTÍCULOS: Contenido Directo + Actividades
-                             Grid::make(1)
+                            Grid::make(1)
                                 ->visible(fn (Get $get) => $get('content_type') === 'article')
                                 ->schema([
                                     RichEditor::make('article_details.content_text')
@@ -271,59 +292,66 @@ class EducationalContentForm
                                         ->fileAttachmentsDisk('public')
                                         ->fileAttachmentsDirectory('content/articles')
                                         ->fileAttachmentsVisibility('public')
-                                        ->live(onBlur: true)
+                                        ->live(debounce: 2500)
                                         ->afterStateUpdated(function (Set $set, ?string $state) { // El ? permite que sea nulo
                                             // 1. Verificamos si hay texto, si no, ponemos 0 o 1
                                             if (blank($state)) {
                                                 $set('article_details.read_time', 0);
+
                                                 return;
                                             }
 
                                             // 2. Limpiamos el HTML
                                             $plainText = strip_tags($state);
-                                            
+
                                             // 3. Contamos palabras (usando el helper de Laravel para soporte multi-idioma)
                                             $words = Str::wordCount($plainText);
-                                            
+
                                             // 4. Calculamos (200 palabras por minuto es el estándar)
                                             $minutes = (int) ceil($words / 200);
-                                            
+
                                             // 5. Asignamos el valor al campo del JSON
                                             $set('article_details.read_time', max(1, $minutes));
                                         }),
-                                    
+
                                     self::getAudioSectionSchema('article_details'),
 
                                     Repeater::make('references')
-                                    ->collapsed()
-                                    ->label('Bibliografía y Referencias')
-                                    ->itemLabel(function (array $state, $uuid, $component): string {
-                                        $index = array_search($uuid, array_keys($component->getState())) + 1;
-                                        
-                                        return "[{$index}] " . Str::limit($state['citation'] ?? '', 40);
-                                    })
-                                    ->schema([
-                                        Group::make([
-                                            Textarea::make('citation')
-                                                ->hiddenLabel()
-                                                ->placeholder('Pega aquí la cita bibliográfica...')
-                                                ->rows(1)
-                                                ->autosize()
-                                                ->required()
-                                                ->grow(),
-                                        ])->columns(1),
-                                    ])
-                                    ->reorderable()
-                                    ->reorderableWithButtons()
-                                    ->collapsible()
-                                    ->cloneable()
-                                    ->addActionLabel('Añadir nueva fuente')
-                                    ->defaultItems(0),
+                                        ->collapsed()
+                                        ->label('Bibliografía y Referencias')
+                                        ->itemLabel(function (array $state, $uuid, $component): string {
+                                            $index = array_search($uuid, array_keys($component->getState())) + 1;
+
+                                            return "[{$index}] ".Str::limit($state['citation'] ?? '', 40);
+                                        })
+                                        ->schema([
+                                            Group::make([
+                                                Textarea::make('citation')
+                                                    ->hiddenLabel()
+                                                    ->placeholder('Pega aquí la cita bibliográfica...')
+                                                    ->rows(1)
+                                                    ->autosize()
+                                                    ->required()
+                                                    ->grow(),
+                                            ])->columns(1),
+                                        ])
+                                        ->reorderable()
+                                        ->reorderableWithButtons()
+                                        ->collapsible()
+                                        ->cloneable()
+                                        ->addActionLabel('Añadir nueva fuente')
+                                        ->defaultItems(0),
 
                                     Repeater::make('activities')
                                         ->label('Actividades del Artículo')
                                         ->relationship('activities')
                                         ->orderColumn('activity_order') // MorphMany
+                                        ->mutateRelationshipDataBeforeCreateUsing(
+                                            fn (array $data): ?array => self::prepareActivityForDraft($data)
+                                        )
+                                        ->mutateRelationshipDataBeforeSaveUsing(
+                                            fn (array $data): ?array => self::prepareActivityForDraft($data)
+                                        )
                                         ->schema(self::getActivitySchema())
                                         ->defaultItems(0)
                                         ->addActionLabel('Añadir nueva actividad')
@@ -339,149 +367,195 @@ class EducationalContentForm
                     Step::make('Publicación')
                         ->schema([
                             Group::make()
-                            ->schema([
-                                Select::make('status')
-                                ->options([
-                                    'draft' => 'Borrador',
-                                    'reviewed' => 'Revisado',
-                                    'published' => 'Publicado',
-                                ])
-                                ->default('draft')
-                                ->required(),
-                            // Detalles de Artículo
-                                
-                            Toggle::make('is_published')->label('Publicar ahora'),
-                            ])->columns(2),
-                        ])
-                      
-                ])
-                ->columnSpanFull()
-                ->submitAction(
-                    Action::make('save')
-                        ->label('Guardar')
-                        ->submit('save')
-                        ->color('primary')
-                        ->icon('heroicon-o-folder-open')
+                                ->schema([
+                                    Select::make('status')
+                                        ->options([
+                                            'draft' => 'Borrador',
+                                            'reviewed' => 'Revisado',
+                                            'published' => 'Publicado',
+                                        ])
+                                        ->default('draft')
+                                        ->required(),
+                                    // Detalles de Artículo
 
-                        
-                    )
+                                    Toggle::make('is_published')->label('Publicar ahora'),
+                                ])->columns(2),
+                        ]),
+
+                ])
+                    ->columnSpanFull()
+                    ->submitAction(
+                        Action::make('save')
+                            ->label('Guardar')
+                            ->submit('save')
+                            ->color('primary')
+                            ->icon('heroicon-o-folder-open')
+
+                    ),
             ]);
     }
 
+    public static function getAudioSectionSchema(string $prefix = ''): Section
+    {
+        $dot = filled($prefix) ? '.' : '';
 
+        return Section::make('Audio Narrado')
+            ->description('Genera una versión en audio profesional de tu contenido.')
+            ->icon('heroicon-o-speaker-wave')
+            ->collapsed()
+            ->schema([
+                ToggleButtons::make("{$prefix}{$dot}voice_id")
+                    ->label('Selecciona una voz')
+                    ->options([
+                        'Charon' => 'Charon',
+                        'Aoede' => 'Aoede',
+                        'Puck' => 'Puck',
+                    ])
+                    ->default('Charon')
+                    ->afterStateHydrated(fn ($component, $state) => blank($state) ? $component->state('Charon') : null)
+                    ->required()
+                    ->inline()
+                    ->live(),
 
-public static function getAudioSectionSchema(string $prefix = ''): Section
-{
-    $dot = filled($prefix) ? '.' : '';
+                Hidden::make("{$prefix}{$dot}audio_url")->live(),
+                Hidden::make("{$prefix}{$dot}audio_timestamps"),
+            ])
+            ->footerActions([
+                MediaAction::make('listen')
+                    ->label('Escuchar')
+                    ->icon('heroicon-o-play')
+                    ->color('secondary')
+                    ->visible(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")))
+                    ->media(fn (Get $get) => $get("{$prefix}{$dot}audio_url"))
+                    ->mediaType(MediaAction::TYPE_AUDIO),
 
-    return Section::make('Audio Narrado')
-        ->description('Genera una versión en audio profesional de tu contenido.')
-        ->icon('heroicon-o-speaker-wave')
-        ->collapsed()
-        ->schema([
-            ToggleButtons::make("{$prefix}{$dot}voice_id")
-                ->label('Selecciona una voz')
-                ->options([
-                    'Charon' => 'Charon',
-                    'Aoede' => 'Aoede',
-                    'Puck' => 'Puck'
-                ])
-                ->default('Charon')
-                ->afterStateHydrated(fn ($component, $state) => blank($state) ? $component->state('Charon') : null)
-                ->required()
-                ->inline()
-                ->live(),
-            
-            Hidden::make("{$prefix}{$dot}audio_url")->live(),
-            Hidden::make("{$prefix}{$dot}audio_timestamps"),
-        ])
-        ->footerActions([
-            MediaAction::make('listen')
-                ->label('Escuchar')
-                ->icon('heroicon-o-play')
-                ->color('secondary')
-                ->visible(fn(Get $get) => filled($get("{$prefix}{$dot}audio_url")))
-                ->media(fn(Get $get) => $get("{$prefix}{$dot}audio_url"))
-                ->mediaType(MediaAction::TYPE_AUDIO),
+                Action::make('generate')
+                    ->label(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")) ? 'Regenerar audio' : 'Generar audio')
+                    ->icon('heroicon-m-speaker-wave')
+                    ->color('primary')
+                    ->modalHeading('Generar audio narrado')
+                    ->modalDescription('Guardaremos el borrador y generaremos la narración en segundo plano. Puedes continuar trabajando mientras termina.')
+                    ->modalSubmitActionLabel('Generar')
+                    ->requiresConfirmation()
+                    ->action(function (Get $get, $record, $livewire) use ($prefix, $dot) {
+                        $text = strip_tags($get(filled($prefix) ? "{$prefix}.content_text" : 'content_text') ?? '');
 
-            Action::make('generate')
-                ->label(fn (Get $get) => filled($get("{$prefix}{$dot}audio_url")) ? 'Regenerar audio' : 'Generar audio')
-                ->icon('heroicon-m-speaker-wave')
-                ->color('primary')
-                ->modalHeading('Generar audio narrado')
-                ->modalDescription('Se generará la narración en segundo plano. Debes guardar el contenido antes de generar audio. ¿Continuar?')
-                ->modalSubmitActionLabel('Generar')
-                ->requiresConfirmation()
-                ->action(function (Get $get, $record) use ($prefix, $dot) {
-                    $text = strip_tags($get(filled($prefix) ? "{$prefix}.content_text" : "content_text") ?? '');
-                    
-                    if (blank($text)) {
-                        Notification::make()
-                            ->title('No hay contenido')
-                            ->body('Escribe el contenido antes de generar audio.')
-                            ->warning()
-                            ->send();
-                        return;
-                    }
-
-                    // Determinar el modelo y contexto
-                    $target = null;
-                    $contextInfo = [];
-                    
-                    if ($prefix === 'article_details') {
-                        if (!$record || !$record->exists) {
+                        if (blank($text)) {
                             Notification::make()
-                                ->title('Guarda el artículo primero')
-                                ->body('Debes guardar el contenido antes de generar audio.')
+                                ->title('No hay contenido')
+                                ->body('Escribe el contenido antes de generar audio.')
                                 ->warning()
                                 ->send();
+
                             return;
                         }
-                        $target = $record;
-                        $contextInfo = [
-                            'type' => 'article',
-                            'title' => $record->title,
-                        ];
-                    } else {
-                        $lessonId = $get('id');
-                        if (!$lessonId) {
-                            Notification::make()
-                                ->title('Guarda la lección primero')
-                                ->body('Debes guardar el contenido antes de generar audio.')
-                                ->warning()
-                                ->send();
-                            return;
+
+                        // Persiste silenciosamente el texto actual antes de enviar el
+                        // trabajo. Ya no hace falta guardar, salir y volver a editar.
+                        if (method_exists($livewire, 'autosaveDraft')) {
+                            $livewire->autosaveDraft();
                         }
-                        
-                        $target = \App\Models\Lesson::find($lessonId);
-                        if ($target) {
+
+                        $parentRecord = method_exists($livewire, 'getRecord') ? $livewire->getRecord() : null;
+
+                        // Determinar el modelo y contexto
+                        $target = null;
+                        $contextInfo = [];
+
+                        if ($prefix === 'article_details') {
+                            if (! $parentRecord || ! $parentRecord->exists) {
+                                Notification::make()
+                                    ->title('No se pudo proteger el borrador')
+                                    ->body('Intenta nuevamente en unos segundos.')
+                                    ->warning()
+                                    ->send();
+
+                                return;
+                            }
+                            $target = $parentRecord->fresh();
+                            $contextInfo = [
+                                'type' => 'article',
+                                'title' => $target->title,
+                            ];
+                        } else {
+                            $target = $record instanceof Lesson ? $record->fresh() : null;
+
+                            if (! $target && $parentRecord) {
+                                $target = Lesson::query()
+                                    ->where('content_id', $parentRecord->id)
+                                    ->where('slug', $get('slug'))
+                                    ->first();
+                            }
+
+                            if (! $target) {
+                                Notification::make()
+                                    ->title('La lección aún se está guardando')
+                                    ->body('Espera unos segundos y vuelve a generar el audio.')
+                                    ->warning()
+                                    ->send();
+
+                                return;
+                            }
+
                             $contextInfo = [
                                 'type' => 'lesson',
                                 'lesson_title' => $target->title,
-                                'educational_resource_title' => $target->educationalContent->title ?? 'Recurso Educativo',
+                                'educational_resource_title' => $target->content?->title ?? 'Recurso Educativo',
                             ];
                         }
-                    }
 
-                    $voiceId = $get("{$prefix}{$dot}voice_id") ?? 'Charon';
+                        $voiceId = $get("{$prefix}{$dot}voice_id") ?? 'Charon';
+                        $contextInfo['source_hash'] = hash('sha256', preg_replace('/\s+/u', ' ', trim($text)) ?? trim($text));
 
-                    \App\Jobs\ProcessAudioFull::dispatch(
-                        $target, 
-                        $text, 
-                        $voiceId, 
-                        auth()->user(), 
-                        $prefix,
-                        $contextInfo
-                    );
+                        \App\Jobs\ProcessAudioFull::dispatch(
+                            $target,
+                            $text,
+                            $voiceId,
+                            auth()->user(),
+                            $prefix,
+                            $contextInfo
+                        );
 
-                    Notification::make()
-                        ->title('Generando audio...')
-                        ->body('Te notificaremos cuando esté listo.')
-                        ->info()
-                        ->send();
-                }),
-        ]);
-}
+                        Notification::make()
+                            ->title('Generando audio...')
+                            ->body('Te notificaremos cuando esté listo.')
+                            ->info()
+                            ->send();
+                    }),
+            ]);
+    }
+
+    protected static function prepareLessonForDraft(array $data, bool $isCreating = true): ?array
+    {
+        if ($isCreating && blank($data['title'] ?? null) && blank(strip_tags($data['content_text'] ?? ''))) {
+            return null;
+        }
+
+        $data['title'] = filled($data['title'] ?? null) ? $data['title'] : 'Lección sin título';
+        $data['slug'] = filled($data['slug'] ?? null)
+            ? $data['slug']
+            : Str::slug($data['title']).'-'.Str::lower(Str::random(8));
+        $data['estimated_duration'] = (int) ($data['estimated_duration'] ?? 0);
+
+        // El audio lo escribe exclusivamente el trabajo en segundo plano. Así un
+        // formulario abierto con estado antiguo no puede borrarlo después.
+        unset($data['audio_url'], $data['audio_timestamps']);
+
+        return $data;
+    }
+
+    protected static function prepareActivityForDraft(array $data): ?array
+    {
+        if (blank($data['activity_type'] ?? null) || blank($data['title'] ?? null)) {
+            return null;
+        }
+
+        $data['content_data'] = is_array($data['content_data'] ?? null)
+            ? $data['content_data']
+            : [];
+
+        return $data;
+    }
 
     // public static function getAudioSectionSchema(string $prefix = ''): Section
     // {
@@ -628,8 +702,8 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                         ->addActionLabel('Añadir otra opción')
                         ->defaultItems(2)
                         ->reorderableWithButtons(),
-                    
-                   // True/False - Versión simplificada
+
+                    // True/False - Versión simplificada
                     Radio::make('content_data.correct_answer')
                         ->label('¿Cuál es la respuesta correcta para esta afirmación?')
                         ->visible(fn (Get $get) => $get('activity_type') === 'quiz_true_false')
@@ -654,7 +728,7 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                         ->placeholder('Ej: No es correcto. La respuesta correcta es falso porque...')
                         ->rows(3)
                         ->required(),
-                        
+
                     // Drag Drop — Categorías
                     Repeater::make('content_data.categories')
                         ->label('Categorías')
@@ -675,7 +749,7 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                         ->addActionLabel('Añadir categoría')
                         ->defaultItems(2)
                         ->reorderableWithButtons(),
-                        
+
                     // Matching
                     Repeater::make('content_data.pairs')
                         ->label('Crear parejas')
@@ -693,7 +767,7 @@ public static function getAudioSectionSchema(string $prefix = ''): Section
                         ])
                         ->columns(2)
                         ->addActionLabel('Añadir nueva pareja')
-                        ->reorderableWithButtons()
+                        ->reorderableWithButtons(),
                 ]),
         ];
     }

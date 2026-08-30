@@ -92,17 +92,24 @@ class Taxa extends Model
     // Usamos la propiedad (colección eager loaded) en vez del método (query)
     // para aprovechar el eager loading del Service
     $ref = $this->apiReferences->firstWhere('api_source', 'inaturalist');
+    $gbifRef = $this->apiReferences->firstWhere('api_source', 'gbif');
     $eolRef = $this->apiReferences->firstWhere('api_source', 'eol');
+    $gbifPhoto = collect($gbifRef?->data['media'] ?? [])
+        ->map(fn ($media) => is_array($media) ? ($media['identifier'] ?? null) : null)
+        ->filter()
+        ->first();
     if ($ref && $ref->data) {
         $apiData = $ref->data;
+        $fallbackPhoto = $eolRef?->data['default_photo'] ?? ($gbifPhoto ? ['url' => $gbifPhoto] : null);
+        $defaultPhoto = !empty($apiData['default_photo']) ? $apiData['default_photo'] : $fallbackPhoto;
         $enriched = array_merge($enriched, [
             'rank' => $apiData['rank'] ?? null,
             'wikipedia_url' => $apiData['wikipedia_url'] ?? null,
             'wikipedia_summary' => $apiData['wikipedia_summary'] ?? null, // ✅ AGREGADO: Resumen
-            'default_photo' => $apiData['default_photo'] ?? null,
+            'default_photo' => $defaultPhoto,
             'observations_count_api' => $apiData['observations_count'] ?? 0,
             'ancestry_full' => $apiData['ancestry'] ?? null,
-            'gallery' => $apiData['gallery'] ?? [],
+            'gallery' => !empty($apiData['gallery']) ? $apiData['gallery'] : ($fallbackPhoto ? [$fallbackPhoto] : []),
             'ancestors' => $apiData['ancestors'] ?? [], // ✅ AGREGADO: Ancestros completos
             'conservation_status_details' => $apiData['conservation_status'] ?? null, // ✅ AGREGADO: Detalles de conservación
         ]);
@@ -114,6 +121,14 @@ class Taxa extends Model
         $enriched['is_endemic'] = $establishmentData['is_endemic'];
         $enriched['is_introduced'] = $establishmentData['is_introduced'];
         $enriched['establishment_status_colombia'] = $establishmentData['status'];  // Para frontend
+    }
+
+    if (!$ref) {
+        $fallbackPhoto = $eolRef?->data['default_photo'] ?? ($gbifPhoto ? ['url' => $gbifPhoto] : null);
+        if ($fallbackPhoto) {
+            $enriched['default_photo'] = $fallbackPhoto;
+            $enriched['gallery'] = [$fallbackPhoto];
+        }
     }
 
     // Asegurar que los campos locales de trazabilidad siempre estén presentes

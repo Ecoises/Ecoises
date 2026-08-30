@@ -108,6 +108,11 @@ class EolService extends BaseApiService
         ]);
         $summary = $this->selectArticle($articles, ['brief summary']);
         $role = $this->inferEcologicalRole($articles);
+        $photo = collect($taxonConcept['dataObjects'] ?? [])
+            ->filter(fn (array $object) => str_contains(mb_strtolower($object['dataType'] ?? ''), 'image'))
+            ->map(fn (array $object) => $this->normalizeImage($object))
+            ->filter(fn (?array $image) => $image !== null)
+            ->first();
 
         return [
             'schema_version' => 2,
@@ -115,6 +120,7 @@ class EolService extends BaseApiService
             'eol_url' => "https://eol.org/pages/{$eolId}",
             'scientific_name' => $taxonConcept['scientificName'] ?? null,
             'role' => $role,
+            'default_photo' => $photo,
             // El destacado responde una pregunta distinta al resumen: que funcion
             // cumple la especie. Si no hay evidencia explicita, no mostramos una
             // descripcion general como si fuera importancia ecologica.
@@ -122,6 +128,7 @@ class EolService extends BaseApiService
             'habitat' => $habitat,
             'diet' => $diet,
             'natural_history' => $summary,
+            'ecology' => $ecology,
             'enriched_at' => now()->toIso8601String(),
         ];
     }
@@ -143,6 +150,23 @@ class EolService extends BaseApiService
             'provider' => collect($object['agents'] ?? [])->pluck('full_name')->filter()->first(),
             'vetted_status' => $object['vettedStatus'] ?? null,
             'rating' => isset($object['dataRating']) ? (float) $object['dataRating'] : null,
+        ];
+    }
+
+    protected function normalizeImage(array $object): ?array
+    {
+        $url = $object['thumbnailURL'] ?? $object['mediaURL'] ?? $object['eolMediaURL'] ?? null;
+
+        if (!$url) {
+            return null;
+        }
+
+        return [
+            'url' => $url,
+            'medium_url' => $object['mediaURL'] ?? $url,
+            'attribution' => $object['rightsHolder'] ?? $object['agents'][0]['full_name'] ?? null,
+            'license_code' => $object['license'] ?? null,
+            'source_url' => $object['source'] ?? null,
         ];
     }
 

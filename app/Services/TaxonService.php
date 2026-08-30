@@ -724,6 +724,21 @@ class TaxonService
     }
 
     /**
+     * Guarda un taxón encontrado directamente por iNaturalist.
+     * Se usa cuando el catálogo geográfico de GBIF no tiene una coincidencia.
+     */
+    public function enrichFromINaturalistId(string $externalId): ?Taxa
+    {
+        $response = $this->iNaturalistService->getTaxonById($externalId);
+
+        if (!($response['success'] ?? false) || empty($response['data'])) {
+            return null;
+        }
+
+        return $this->createOrUpdateTaxonFromApiData($response['data']);
+    }
+
+    /**
      * Obtiene status de establecimiento para un taxón en el lugar configurado
      * Cachea por 24h para evitar llamadas repetidas.
      */
@@ -1369,26 +1384,27 @@ public function mapEstablishmentMeans(?string $status): array
                     if (empty($filters['enrich']) || $filters['enrich'] === 'false' || $filters['enrich'] === '0') {
                         // Check for photo manually from relation (Eager loaded 'apiReferences')
                         // We need to parse the 'data' JSON column of the pivot/reference
-                        $ref = $taxon->apiReferences->first(); // Already loaded? Yes, with('apiReferences')
+                        $ref = $taxon->apiReferences->firstWhere('api_source', 'inaturalist');
                         $photoUrl = null;
                         
                         // Try to get photo from ref data without full enrichment logic
-                        if ($ref && $ref->data && !empty($ref->data['default_photo']['url'])) {
-                            $photoUrl = $ref->data['default_photo']['url'];
+                        if ($ref && $ref->data && !empty($ref->data['default_photo'])) {
+                            $photo = $ref->data['default_photo'];
+                            $photoUrl = is_array($photo)
+                                ? ($photo['medium_url'] ?? $photo['url'] ?? $photo['original_url'] ?? null)
+                                : null;
                         } elseif ($taxon->default_photo) { 
                              // Fallback to model attribute if exists (legacy)
                              $photoUrl = $taxon->default_photo;
                         }
 
-                        if ($photoUrl) {
-                             $finalTaxa[] = [
-                                 'id' => $taxon->id,
-                                 'scientific_name' => $taxon->scientific_name,
-                                 'common_name' => $taxon->common_name,
-                                 'default_photo' => ['url' => $photoUrl],
-                                 // Minimal fields for card
-                             ];
-                        }
+                        $finalTaxa[] = [
+                            'id' => $taxon->id,
+                            'scientific_name' => $taxon->scientific_name,
+                            'common_name' => $taxon->common_name,
+                            'default_photo' => $photoUrl ? ['url' => $photoUrl] : null,
+                            // Minimal fields for card
+                        ];
                     } else {
                         // Original Heavy Path
                         $enrichedData = $taxon->enriched_data;

@@ -5,6 +5,7 @@ namespace App\Services\Api;
 use App\Services\ConservationStatusResolver;
 
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
@@ -494,6 +495,49 @@ class INaturalistService extends BaseApiService
                 'api' => $this->apiName,
             ];
         }
+    }
+
+    /**
+     * Obtiene especies observadas cerca de un punto, sin repetir taxones.
+     */
+    public function getNearbySpecies(float $latitude, float $longitude, int $radiusKm, int $limit = 100): array
+    {
+        $result = $this->getObservations([
+            'lat' => $latitude,
+            'lng' => $longitude,
+            'radius' => min(100, max(1, $radiusKm)),
+            'per_page' => min(200, max(1, $limit)),
+            'order_by' => 'observed_on',
+            'order' => 'desc',
+            'photos' => 'true',
+        ]);
+
+        if (!($result['success'] ?? false)) {
+            return $result;
+        }
+
+        $species = collect($result['data'] ?? [])
+            ->map(fn (array $observation) => [
+                'taxon' => $observation['taxon'] ?? null,
+                'observation_count' => 1,
+            ])
+            ->filter(fn (array $entry) => !empty($entry['taxon']['id']) && !empty($entry['taxon']['name']))
+            ->groupBy(fn (array $entry) => $entry['taxon']['id'])
+            ->map(function (Collection $entries) {
+                $taxon = $entries->first()['taxon'];
+                $taxon['observation_count'] = $entries->sum('observation_count');
+                return $taxon;
+            })
+            ->values()
+            ->all();
+
+        return [
+            'success' => true,
+            'data' => $species,
+            'total' => $result['total'] ?? count($species),
+            'cached' => $result['cached'] ?? false,
+            'api' => $this->apiName,
+        ];
     }
 
     /**

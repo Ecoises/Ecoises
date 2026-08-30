@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Jobs\EnrichSpeciesJob;
 use App\Models\Taxa;
 use App\Services\Api\GbifService;
+use App\Services\Api\INaturalistService;
+use App\Services\SpeciesMerger;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 
@@ -12,8 +14,14 @@ class ExplorerService
 {
     private const CACHE_TTL_SECONDS = 1800;
     private const THREATENED_STATUSES = ['VU', 'EN', 'CR'];
+    private const SYNCHRONOUS_ENRICHMENT_LIMIT = 8;
 
-    public function __construct(protected GbifService $gbif)
+    public function __construct(
+        protected GbifService $gbif,
+        protected INaturalistService $inat,
+        protected SpeciesMerger $merger,
+        protected TaxonService $taxonService,
+    )
     {
     }
 
@@ -29,7 +37,7 @@ class ExplorerService
             fn () => $this->gbif->searchSpeciesByRegion($lat, $lng, $radius, $gbifFilters)
         );
 
-        return $this->formatCatalogResult($catalogResult, $filters, $radius);
+        return $this->formatCatalogResult($catalogResult, $filters, $radius, $lat, $lng);
     }
 
     public function exploreNational(array $filters = []): array
@@ -44,7 +52,7 @@ class ExplorerService
             fn () => $this->gbif->searchSpeciesByCountry('CO', $gbifFilters)
         );
 
-        return $this->formatCatalogResult($catalogResult, $filters, null);
+        return $this->formatCatalogResult($catalogResult, $filters, null, null, null);
     }
 
     private function buildGbifFilters(array $filters): array
@@ -71,7 +79,13 @@ class ExplorerService
         ], fn ($value) => $value !== null && $value !== '' && $value !== false);
     }
 
-    private function formatCatalogResult(array $catalogResult, array $filters, ?int $radius): array
+    private function formatCatalogResult(
+        array $catalogResult,
+        array $filters,
+        ?int $radius,
+        ?float $latitude = null,
+        ?float $longitude = null,
+    ): array
     {
         if (!($catalogResult['success'] ?? false)) {
             return [
@@ -111,6 +125,39 @@ class ExplorerService
             ->get()
             ->keyBy('id');
 
+        // GBIF entrega primero la cobertura geográfica, pero los datos de iNaturalist
+        // pueden llegar después por cola. Enriquecemos una parte de la página visible
+        // antes de responder para que las tarjetas no aparezcan vacías en el primer load.
+        $syncNames = $taxaById
+            ->filter(function (Taxa $taxon) {
+                $inatRef = $taxon->apiReferences->firstWhere('api_source', 'inaturalist');
+                $data = $inatRef?->data ?? [];
+
+                return !$inatRef
+                    || empty($data['default_photo']) && empty($data['wikipedia_summary']);
+            })
+            ->pluck('scientific_name')
+            ->filter()
+            ->unique()
+            ->take(self::SYNCHRONOUS_ENRICHMENT_LIMIT)
+            ->values();
+
+        foreach ($syncNames as $scientificName) {
+            try {
+                app(EnrichSpeciesJob::class, ['canonicalName' => $scientificName])
+                    ->handle($this->gbif, $this->inat, $this->merger);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        if ($syncNames->isNotEmpty()) {
+            $taxaById = Taxa::with('apiReferences')
+                ->whereIn('id', array_values($keyToId))
+                ->get()
+                ->keyBy('id');
+        }
+
         $results = [];
         foreach ($pageBuckets as $bucket) {
             $speciesKey = (string) $bucket['species_key'];
@@ -134,6 +181,39 @@ class ExplorerService
             $results[] = $item;
         }
 
+        $inatOnly = $radius !== null && $page === 1
+            ? $this->findINaturalistOnlySpecies(
+                $detailsByKey,
+                $latitude,
+                $longitude,
+                $radius,
+            )
+            : [];
+
+        if ($inatOnly) {
+            $inatNames = collect($inatOnly)->pluck('name')->values();
+            foreach ($inatOnly as $inatSpecies) {
+                try {
+                    $this->taxonService->enrichFromINaturalistId((string) $inatSpecies['id']);
+                } catch (\Throwable $exception) {
+                    report($exception);
+                }
+            }
+
+            $inatTaxa = Taxa::with('apiReferences')
+                ->whereIn('scientific_name', $inatNames->take(self::SYNCHRONOUS_ENRICHMENT_LIMIT)->all())
+                ->get();
+
+            foreach ($inatTaxa as $taxon) {
+                $item = $taxon->enriched_data;
+                $source = collect($inatOnly)->firstWhere('name', $taxon->scientific_name);
+                $item['scientific_name'] = $taxon->scientific_name;
+                $item['observation_count'] = (int) ($source['observation_count'] ?? 0);
+                $item['source'] = 'inaturalist';
+                $results[] = $item;
+            }
+        }
+
         foreach (array_unique($toEnrich) as $name) {
             EnrichSpeciesJob::dispatch($name)->onQueue('species-sync');
         }
@@ -146,6 +226,8 @@ class ExplorerService
             'data' => $results,
             'meta' => [
                 'source' => 'gbif',
+                'secondary_source' => $inatOnly ? 'inaturalist' : null,
+                'inat_only_count' => count($inatOnly),
                 'scope' => $radius === null ? 'national' : 'nearby',
                 'cached' => (bool) ($catalogResult['cached'] ?? false),
                 'radius_km' => $radius,
@@ -163,6 +245,41 @@ class ExplorerService
                 ],
             ],
         ];
+    }
+
+    private function findINaturalistOnlySpecies(array $gbifDetails, ?float $latitude, ?float $longitude, int $radius): array
+    {
+        if ($latitude === null || $longitude === null) {
+            return [];
+        }
+
+        $gbifNames = collect($gbifDetails)
+            ->map(fn (array $details) => SpeciesMerger::stripAuthorship(
+                $details['canonicalName'] ?? $details['species'] ?? $details['scientificName'] ?? ''
+            ))
+            ->filter()
+            ->mapWithKeys(fn (string $name) => [mb_strtolower($name) => true]);
+        $details = $this->inat->getNearbySpecies($latitude, $longitude, $radius, 100);
+
+        if (!($details['success'] ?? false)) {
+            return [];
+        }
+
+        return collect($details['data'] ?? [])
+            ->filter(fn (array $taxon) => !empty($taxon['name']))
+            ->reject(fn (array $taxon) => $gbifNames->has(
+                mb_strtolower(SpeciesMerger::stripAuthorship($taxon['name']))
+            ))
+            ->map(fn (array $taxon) => [
+                'id' => $taxon['id'],
+                'name' => SpeciesMerger::stripAuthorship($taxon['name']),
+                'common_name' => $taxon['common_name'] ?? null,
+                'default_photo' => $taxon['default_photo'] ?? null,
+            ])
+            ->unique('name')
+            ->take(8)
+            ->values()
+            ->all();
     }
     private function catalogCacheKey(float $lat, float $lng, int $radius, array $filters): string
     {
