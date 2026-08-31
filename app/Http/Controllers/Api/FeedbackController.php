@@ -6,12 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Models\EducationalContent;
 use App\Models\Report;
 use App\Models\UserContentEnrollment;
+use App\Services\ModerationNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class FeedbackController extends Controller
 {
+    public function __construct(private readonly ModerationNotificationService $notifications) {}
+
     public function storeGeneral(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -33,6 +36,8 @@ class FeedbackController extends Controller
             'metadata' => $validated['context'] ?? null,
         ]);
 
+        $this->notifications->notifyNewReport($report);
+
         return response()->json([
             'success' => true,
             'message' => 'Gracias. Tu mensaje fue enviado al equipo de Ecoises.',
@@ -48,7 +53,7 @@ class FeedbackController extends Controller
             'comment' => ['nullable', 'string', 'max:3000', 'required_without:rating'],
         ]);
 
-        DB::transaction(function () use ($request, $content, $validated): void {
+        $newReport = DB::transaction(function () use ($request, $content, $validated): ?Report {
             UserContentEnrollment::updateOrCreate(
                 ['user_id' => $request->user()->id, 'content_id' => $content->id],
                 [
@@ -88,8 +93,16 @@ class FeedbackController extends Controller
                     'priority' => Report::PRIORITY_NORMAL,
                     'metadata' => ['rating' => $validated['rating'] ?? null],
                 ])->save();
+
+                return $report->wasRecentlyCreated ? $report : null;
             }
+
+            return null;
         });
+
+        if ($newReport) {
+            $this->notifications->notifyNewReport($newReport);
+        }
 
         return response()->json([
             'success' => true,

@@ -422,6 +422,8 @@ class ObservationController extends Controller
                 'priority' => \App\Models\Report::PRIORITY_NORMAL,
             ]);
 
+            app(\App\Services\ModerationNotificationService::class)->notifyNewReport($report);
+
             return response()->json([
                 'success' => true,
                 'message' => 'El reporte ha sido registrado correctamente.',
