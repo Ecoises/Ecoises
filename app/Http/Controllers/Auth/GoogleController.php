@@ -3,19 +3,18 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use Google\Client;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class GoogleController extends Controller
 {
     /**
      * Handle Google ID Token for authentication.
      *
-     * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function authenticate(Request $request)
@@ -35,7 +34,7 @@ class GoogleController extends Controller
             $payload = $client->verifyIdToken($googleIdToken);
 
             // Si el payload es nulo, el token no es válido
-            if (!$payload) {
+            if (! $payload) {
                 return response()->json(['message' => 'Token de Google ID inválido o expirado.'], 401);
             }
 
@@ -48,7 +47,7 @@ class GoogleController extends Controller
             // Busca el usuario en tu base de datos por google_id
             $user = User::where('google_id', $googleId)->first();
 
-            if (!$user) {
+            if (! $user) {
                 // Si no se encuentra un usuario con ese google_id,
                 // intenta encontrarlo por email.
                 $user = User::where('email', $email)->first();
@@ -68,7 +67,7 @@ class GoogleController extends Controller
                         'email' => $email,
                         'google_id' => $googleId,
                         'password' => bcrypt(Str::random(16)), // Genera una contraseña aleatoria.
-                                                              // No se usará para iniciar sesión con Google.
+                        // No se usará para iniciar sesión con Google.
                         'email_verified_at' => now(), // Asume que Google ya verificó el email
                         'avatar' => $picture, // Guarda el avatar si existe
                     ]);
@@ -86,6 +85,7 @@ class GoogleController extends Controller
             Auth::login($user);
 
             // Genera un token de sesión para el frontend usando Laravel Sanctum
+            $user->load(['currentLevel', 'achievements.achievement']);
             $token = $user->createToken('auth-token')->plainTextToken;
 
             return response()->json([
@@ -96,13 +96,13 @@ class GoogleController extends Controller
 
         } catch (\Google\Exception $e) {
             // Manejo de errores específicos de la librería de Google (ej. token malformado)
-            return response()->json(['message' => 'Error al verificar el token de Google ID: ' . $e->getMessage()], 401);
+            return response()->json(['message' => 'Error al verificar el token de Google ID: '.$e->getMessage()], 401);
         } catch (ValidationException $e) {
             // Manejo de errores de validación de Laravel
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             // Manejo de cualquier otro error inesperado
-            return response()->json(['message' => 'Ocurrió un error inesperado: ' . $e->getMessage()], 500);
+            return response()->json(['message' => 'Ocurrió un error inesperado: '.$e->getMessage()], 500);
         }
     }
 }

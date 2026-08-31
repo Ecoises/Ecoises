@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
-use Illuminate\Foundation\Auth\User as AuthUser;
 use App\Models\EducationalContent;
 use Illuminate\Auth\Access\HandlesAuthorization;
+use Illuminate\Foundation\Auth\User as AuthUser;
 
 class EducationalContentPolicy
 {
     use HandlesAuthorization;
-    
+
     public function viewAny(AuthUser $authUser): bool
     {
         return $authUser->can('ViewAny:EducationalContent');
@@ -19,7 +19,8 @@ class EducationalContentPolicy
 
     public function view(AuthUser $authUser, EducationalContent $educationalContent): bool
     {
-        return $authUser->can('View:EducationalContent');
+        return $authUser->can('View:EducationalContent')
+            && (! $authUser->hasRole('educador') || $educationalContent->author_id === $authUser->getKey());
     }
 
     public function create(AuthUser $authUser): bool
@@ -29,12 +30,25 @@ class EducationalContentPolicy
 
     public function update(AuthUser $authUser, EducationalContent $educationalContent): bool
     {
-        return $authUser->can('Update:EducationalContent');
+        if (! $authUser->can('Update:EducationalContent')) {
+            return false;
+        }
+
+        if (! $authUser->hasRole('educador')) {
+            return true;
+        }
+
+        return $educationalContent->author_id === $authUser->getKey()
+            && $educationalContent->status === EducationalContent::STATUS_DRAFT;
     }
 
     public function delete(AuthUser $authUser, EducationalContent $educationalContent): bool
     {
-        return $authUser->can('Delete:EducationalContent');
+        return $authUser->can('Delete:EducationalContent')
+            && (! $authUser->hasRole('educador') || (
+                $educationalContent->author_id === $authUser->getKey()
+                && $educationalContent->status === EducationalContent::STATUS_DRAFT
+            ));
     }
 
     public function restore(AuthUser $authUser, EducationalContent $educationalContent): bool
@@ -66,5 +80,4 @@ class EducationalContentPolicy
     {
         return $authUser->can('Reorder:EducationalContent');
     }
-
 }

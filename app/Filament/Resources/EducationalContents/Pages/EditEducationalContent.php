@@ -4,6 +4,7 @@ namespace App\Filament\Resources\EducationalContents\Pages;
 
 use App\Filament\Resources\EducationalContents\EducationalContentResource;
 use App\Models\EducationalContent;
+use App\Services\EducationalContentPublicationService;
 use App\Services\EducationalDraftService;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
@@ -13,6 +14,7 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class EditEducationalContent extends EditRecord
@@ -33,9 +35,117 @@ class EditEducationalContent extends EditRecord
                 ->url(fn (): string => static::getResource()::getUrl('index'))
                 ->icon('heroicon-o-x-mark'),
 
+            Action::make('submit_for_review')
+                ->label('Enviar a revisión')
+                ->icon('heroicon-o-paper-airplane')
+                ->color('info')
+                ->visible(fn (): bool => auth()->user()?->can('SubmitForReview:EducationalContent')
+                    && $this->getRecord()->status === EducationalContent::STATUS_DRAFT)
+                ->requiresConfirmation()
+                ->modalDescription('Guardaremos el contenido y comprobaremos que esté completo antes de enviarlo al equipo editorial.')
+                ->action(function (): void {
+                    $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
+
+                    try {
+                        app(EducationalContentPublicationService::class)->submitForReview($this->getRecord()->fresh());
+                        $this->fillForm();
+
+                        Notification::make()
+                            ->title('Contenido enviado a revisión')
+                            ->body('El borrador quedó protegido mientras el equipo editorial lo revisa.')
+                            ->success()
+                            ->send();
+                    } catch (ValidationException $exception) {
+                        $this->notifyValidationErrors($exception, 'El contenido todavía no está listo para revisión');
+                    }
+                }),
+
+            Action::make('mark_reviewed')
+                ->label('Aprobar revisión')
+                ->icon('heroicon-o-clipboard-document-check')
+                ->color('info')
+                ->visible(fn (): bool => auth()->user()?->can('Review:EducationalContent')
+                    && $this->getRecord()->status === EducationalContent::STATUS_PENDING)
+                ->requiresConfirmation()
+                ->action(function (): void {
+                    app(EducationalContentPublicationService::class)->markReviewed($this->getRecord());
+                    $this->fillForm();
+
+                    Notification::make()->title('Contenido revisado')->success()->send();
+                }),
+
+            Action::make('return_to_draft')
+                ->label('Devolver a borrador')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('warning')
+                ->visible(fn (): bool => auth()->user()?->can('Review:EducationalContent')
+                    && in_array($this->getRecord()->status, [
+                        EducationalContent::STATUS_PENDING,
+                        EducationalContent::STATUS_REVIEWED,
+                    ], true))
+                ->requiresConfirmation()
+                ->action(function (): void {
+                    app(EducationalContentPublicationService::class)->returnToDraft($this->getRecord());
+                    $this->fillForm();
+
+                    Notification::make()->title('Contenido devuelto a borrador')->success()->send();
+                }),
+
+            Action::make('publish')
+                ->label('Publicar')
+                ->icon('heroicon-o-check-circle')
+                ->color('success')
+                ->visible(fn (): bool => auth()->user()?->can('Publish:EducationalContent')
+                    && $this->getRecord()->status === EducationalContent::STATUS_REVIEWED)
+                ->requiresConfirmation()
+                ->modalDescription('Primero guardaremos el editor y comprobaremos que la estructura esté completa.')
+                ->action(function (): void {
+                    $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
+
+                    try {
+                        app(EducationalContentPublicationService::class)->publish($this->getRecord()->fresh());
+                        $this->fillForm();
+
+                        Notification::make()
+                            ->title('Contenido publicado')
+                            ->body('La versión pública ya está disponible.')
+                            ->success()
+                            ->send();
+                    } catch (ValidationException $exception) {
+                        $this->notifyValidationErrors($exception, 'El contenido todavía no está listo');
+                    }
+                }),
+
+            Action::make('unpublish')
+                ->label('Despublicar')
+                ->icon('heroicon-o-eye-slash')
+                ->color('warning')
+                ->visible(fn (): bool => auth()->user()?->can('Publish:EducationalContent')
+                    && $this->getRecord()->status === EducationalContent::STATUS_PUBLISHED)
+                ->requiresConfirmation()
+                ->action(function (): void {
+                    app(EducationalContentPublicationService::class)->unpublish($this->getRecord());
+                    $this->fillForm();
+
+                    Notification::make()
+                        ->title('Contenido retirado de la publicación')
+                        ->success()
+                        ->send();
+                }),
+
             DeleteAction::make()
                 ->icon('heroicon-o-trash'),
         ];
+    }
+
+    private function notifyValidationErrors(ValidationException $exception, string $title): void
+    {
+        Notification::make()
+            ->title($title)
+            ->body(collect($exception->errors())->flatten()->implode("\n"))
+            ->warning()
+            ->persistent()
+            ->send();
     }
 
     protected function getFormActions(): array
@@ -141,7 +251,8 @@ class EditEducationalContent extends EditRecord
         };
 
         return $hasTemporaryItem($state['lessons'] ?? null)
-            || $hasTemporaryItem($state['activities'] ?? null);
+            || $hasTemporaryItem($state['activities'] ?? null)
+            || $hasTemporaryItem($state['assets'] ?? null);
     }
 
     protected function mutateFormDataBeforeFill(array $data): array
@@ -160,6 +271,11 @@ class EditEducationalContent extends EditRecord
     protected function handleRecordUpdate(Model $record, array $data): Model
     {
         return DB::transaction(function () use ($record, $data) {
+            $record = app(EducationalDraftService::class)->assignType(
+                $record,
+                $data['content_type'] ?? $record->content_type,
+            );
+
             $courseDetailsData = $data['course_details'] ?? [];
             $articleDetailsData = $data['article_details'] ?? [];
 
@@ -169,6 +285,7 @@ class EditEducationalContent extends EditRecord
 
             unset($data['course_details']);
             unset($data['article_details']);
+            unset($data['content_type']);
 
             $record->update($data);
 

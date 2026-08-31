@@ -43,7 +43,7 @@ class UserArticleProgress extends Model
 
     public function article(): BelongsTo
     {
-        return $this->belongsTo(Article::class, 'article_id');
+        return $this->belongsTo(EducationalContent::class, 'article_id');
     }
 
     public function enrollment(): BelongsTo

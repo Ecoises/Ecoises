@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\EducationalContents\Schemas;
 
 use App\Models\EducationalContent;
+use App\Models\EducationalContentAsset;
 use App\Models\Lesson; // Ensure Lesson model exists and has estimateReadingTime if used
 use App\Services\ElevenLabsService;
 use Filament\Actions\Action;
@@ -106,17 +107,13 @@ class EducationalContentForm
                                 ->schema([
                                     Select::make('content_type')
                                         ->label('Tipo de Contenido')
-                                        ->options([
-                                            'course' => 'Curso',
-                                            'article' => 'Artículo',
-                                        ])
-                                        ->default('course')
+                                        ->options(EducationalContent::getTypes())
+                                        ->placeholder('Selecciona el tipo de contenido')
+                                        ->helperText('Elige con cuidado: el tipo queda fijado cuando comienza a guardarse la estructura.')
                                         ->required()
                                         ->native(false)
                                         ->live()
-                                        // Los nuevos contenidos entran al editor como un borrador
-                                        // persistente, por lo que el tipo debe poder elegirse allí.
-                                        ->disabled(fn (?EducationalContent $record): bool => $record?->status !== EducationalContent::STATUS_DRAFT),
+                                        ->disabled(fn (?EducationalContent $record): bool => filled($record?->content_type)),
 
                                     Select::make('categories')
                                         ->relationship('categories', 'name')
@@ -359,6 +356,79 @@ class EducationalContentForm
                                         ->collapsible()
                                         ->collapsed(),
                                 ]),
+
+                            Section::make('Recursos visuales y descargables')
+                                ->description(fn (Get $get): string => $get('content_type') === EducationalContent::TYPE_RESOURCE
+                                    ? 'Este será el contenido principal. Añade una o varias imágenes, infografías, publicaciones PDF o enlaces.'
+                                    : 'Material complementario opcional para enriquecer el contenido sin recargar la lectura.')
+                                ->icon('heroicon-o-paper-clip')
+                                ->visible(fn (Get $get): bool => filled($get('content_type')))
+                                ->schema([
+                                    Repeater::make('assets')
+                                        ->hiddenLabel()
+                                        ->relationship('assets')
+                                        ->orderColumn('asset_order')
+                                        ->mutateRelationshipDataBeforeCreateUsing(
+                                            fn (array $data): ?array => self::prepareAssetForDraft($data)
+                                        )
+                                        ->mutateRelationshipDataBeforeSaveUsing(
+                                            fn (array $data): ?array => self::prepareAssetForDraft($data)
+                                        )
+                                        ->schema([
+                                            Select::make('asset_type')
+                                                ->label('Tipo de recurso')
+                                                ->options(EducationalContentAsset::getTypes())
+                                                ->required()
+                                                ->native(false)
+                                                ->live(),
+
+                                            TextInput::make('title')
+                                                ->label('Título')
+                                                ->required()
+                                                ->maxLength(255),
+
+                                            Textarea::make('description')
+                                                ->label('Descripción o contexto')
+                                                ->rows(2)
+                                                ->columnSpanFull(),
+
+                                            FileUpload::make('file_path')
+                                                ->label('Archivo')
+                                                ->disk('public')
+                                                ->directory('content/resources')
+                                                ->acceptedFileTypes([
+                                                    'image/*',
+                                                    'application/pdf',
+                                                    'application/msword',
+                                                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                                ])
+                                                ->maxSize(20480)
+                                                ->downloadable()
+                                                ->openable()
+                                                ->required(fn (Get $get): bool => $get('asset_type') !== EducationalContentAsset::TYPE_EXTERNAL_LINK)
+                                                ->visible(fn (Get $get): bool => $get('asset_type') !== EducationalContentAsset::TYPE_EXTERNAL_LINK)
+                                                ->helperText('Imágenes, infografías, PDF o Word. Máximo 20 MB.')
+                                                ->columnSpanFull(),
+
+                                            TextInput::make('external_url')
+                                                ->label('Dirección del recurso')
+                                                ->url()
+                                                ->required(fn (Get $get): bool => $get('asset_type') === EducationalContentAsset::TYPE_EXTERNAL_LINK)
+                                                ->visible(fn (Get $get): bool => $get('asset_type') === EducationalContentAsset::TYPE_EXTERNAL_LINK)
+                                                ->columnSpanFull(),
+
+                                            Toggle::make('is_downloadable')
+                                                ->label('Permitir descarga')
+                                                ->default(true)
+                                                ->visible(fn (Get $get): bool => $get('asset_type') !== EducationalContentAsset::TYPE_EXTERNAL_LINK),
+                                        ])
+                                        ->columns(2)
+                                        ->defaultItems(0)
+                                        ->addActionLabel('Añadir recurso')
+                                        ->reorderableWithButtons()
+                                        ->collapsible()
+                                        ->itemLabel(fn (array $state): ?string => $state['title'] ?? null),
+                                ]),
                         ]),
 
                     /*───────────────────────────────
@@ -371,15 +441,15 @@ class EducationalContentForm
                                     Select::make('status')
                                         ->options([
                                             'draft' => 'Borrador',
+                                            'pending' => 'Pendiente de revisión',
                                             'reviewed' => 'Revisado',
                                             'published' => 'Publicado',
                                         ])
                                         ->default('draft')
-                                        ->required(),
-                                    // Detalles de Artículo
-
-                                    Toggle::make('is_published')->label('Publicar ahora'),
-                                ])->columns(2),
+                                        ->disabled()
+                                        ->dehydrated(false)
+                                        ->helperText('El estado cambia mediante las acciones Enviar a revisión, Aprobar revisión y Publicar.'),
+                                ]),
                         ]),
 
                 ])
@@ -553,6 +623,24 @@ class EducationalContentForm
         $data['content_data'] = is_array($data['content_data'] ?? null)
             ? $data['content_data']
             : [];
+
+        return $data;
+    }
+
+    protected static function prepareAssetForDraft(array $data): ?array
+    {
+        if (blank($data['asset_type'] ?? null)
+            || blank($data['title'] ?? null)
+            || (blank($data['file_path'] ?? null) && blank($data['external_url'] ?? null))) {
+            return null;
+        }
+
+        if (($data['asset_type'] ?? null) === EducationalContentAsset::TYPE_EXTERNAL_LINK) {
+            $data['file_path'] = null;
+            $data['is_downloadable'] = false;
+        } else {
+            $data['external_url'] = null;
+        }
 
         return $data;
     }

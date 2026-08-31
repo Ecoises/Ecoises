@@ -2,15 +2,16 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Dashboard;
+use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use DiogoGPinto\AuthUIEnhancer\AuthUIEnhancerPlugin;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
-use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
-use Filament\Support\Facades\FilamentColor;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -19,8 +20,6 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
-use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
-use DiogoGPinto\AuthUIEnhancer\AuthUIEnhancerPlugin;
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -82,9 +81,9 @@ class AdminPanelProvider extends PanelProvider
             ->plugins([
                 FilamentShieldPlugin::make(),
                 AuthUIEnhancerPlugin::make()
-                ->showEmptyPanelOnMobile(false)
-                ->emptyPanelBackgroundImageOpacity('80%')
-                ->emptyPanelBackgroundImageUrl(asset('images/login.webp')),
+                    ->showEmptyPanelOnMobile(false)
+                    ->emptyPanelBackgroundImageOpacity('80%')
+                    ->emptyPanelBackgroundImageUrl(asset('images/login.webp')),
             ])
             ->middleware([
                 EncryptCookies::class,
@@ -100,6 +99,6 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ]);
-            
+
     }
 }

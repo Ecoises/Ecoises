@@ -22,7 +22,6 @@ class Achievement extends Model
         'category',
         'points',
         'requirement_type',
-        'requirement_value',
         'requirement_criteria',
         'is_active',
         'rarity',
@@ -39,7 +38,7 @@ class Achievement extends Model
     ];
 
     // Relaciones
-    
+
     public function userAchievements(): HasMany
     {
         return $this->hasMany(UserAchievement::class);

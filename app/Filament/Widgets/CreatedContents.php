@@ -2,7 +2,9 @@
 
 namespace App\Filament\Widgets;
 
+use App\Models\EducationalContent;
 use Filament\Widgets\ChartWidget;
+use Illuminate\Database\Eloquent\Builder;
 
 class CreatedContents extends ChartWidget
 {
@@ -10,11 +12,20 @@ class CreatedContents extends ChartWidget
 
     protected static ?int $sort = 2;
 
+    public static function canView(): bool
+    {
+        $user = auth()->user();
+
+        return $user?->can('View:SuperAdminDashboard')
+            || $user?->can('View:EditorialDashboard')
+            || $user?->can('View:EducatorDashboard');
+    }
+
     protected function getData(): array
     {
         $activeFilter = $this->filter;
 
-        $data = \App\Models\EducationalContent::query()
+        $data = $this->contentQuery()
             ->when($activeFilter, fn ($query) => $query->whereYear('created_at', $activeFilter))
             ->selectRaw('MONTH(created_at) as month, count(*) as count')
             ->groupBy('month')
@@ -47,7 +58,7 @@ class CreatedContents extends ChartWidget
     protected function getFilters(): ?array
     {
         // Get all years where content was created
-        $years = \App\Models\EducationalContent::query()
+        $years = $this->contentQuery()
             ->selectRaw('YEAR(created_at) as year')
             ->distinct()
             ->orderBy('year', 'desc')
@@ -56,10 +67,10 @@ class CreatedContents extends ChartWidget
 
         // Ensure current year is always available
         $currentYear = date('Y');
-        if (!isset($years[$currentYear])) {
-             $years[$currentYear] = $currentYear;
+        if (! isset($years[$currentYear])) {
+            $years[$currentYear] = $currentYear;
         }
-        
+
         krsort($years);
 
         return $years;
@@ -67,8 +78,17 @@ class CreatedContents extends ChartWidget
 
     public ?string $filter = null;
 
-    public function mount(): void 
+    public function mount(): void
     {
         $this->filter = (string) now()->year;
+    }
+
+    private function contentQuery(): Builder
+    {
+        return EducationalContent::query()
+            ->when(
+                auth()->user()?->hasRole('educador'),
+                fn (Builder $query): Builder => $query->where('author_id', auth()->id()),
+            );
     }
 }

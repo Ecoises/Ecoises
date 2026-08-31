@@ -2,24 +2,24 @@
 
 namespace App\Services;
 
-use App\Models\User;
-use App\Models\Lesson;
-use App\Models\UserLessonProgress;
-use App\Models\UserContentEnrollment;
+use App\Models\Achievement;
 use App\Models\EducationalContent;
+use App\Models\Lesson;
+use App\Models\User;
 use App\Models\UserActivityAttempt;
+use App\Models\UserArticleProgress;
+use App\Models\UserContentEnrollment;
+use App\Models\UserLessonProgress;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 use Exception;
+use Illuminate\Support\Facades\DB;
 
 class ContentProgressService
 {
-    protected $gamificationService;
-
-    public function __construct(GamificationService $gamificationService)
-    {
-        $this->gamificationService = $gamificationService;
-    }
+    public function __construct(
+        protected GamificationService $gamificationService,
+        protected AchievementService $achievementService,
+    ) {}
 
     /**
      * Incrementa el contador de visitas de un contenido.
@@ -34,12 +34,10 @@ class ContentProgressService
      */
     public function startContent(User $user, EducationalContent $content): UserContentEnrollment
     {
-        $this->incrementViewCount($content);
-
-        return UserContentEnrollment::firstOrCreate(
+        $enrollment = UserContentEnrollment::firstOrCreate(
             [
-                'user_id' => $user->id, 
-                'content_id' => $content->id
+                'user_id' => $user->id,
+                'content_id' => $content->id,
             ],
             [
                 'enrolled_at' => Carbon::now(),
@@ -48,27 +46,56 @@ class ContentProgressService
                 'progress_percentage' => 0,
             ]
         );
+
+        if ($enrollment->wasRecentlyCreated) {
+            $this->incrementViewCount($content);
+        } else {
+            $enrollment->update(['last_accessed_at' => now()]);
+        }
+
+        if ($content->isArticle()) {
+            UserArticleProgress::firstOrCreate(
+                ['user_id' => $user->id, 'article_id' => $content->id],
+                [
+                    'enrollment_id' => $enrollment->id,
+                    'status' => 'en_progreso',
+                    'started_at' => now(),
+                    'last_accessed_at' => now(),
+                    'reading_progress' => 0,
+                ],
+            );
+        } elseif ($content->isCourse()) {
+            $lessons = $content->lessons()->with('activities')->get();
+            $enrollment->update([
+                'total_lessons' => $lessons->count(),
+                'total_points_possible' => $lessons->sum(
+                    fn (Lesson $lesson): int => (int) $lesson->points + (int) $lesson->activities->sum('max_points')
+                ),
+            ]);
+        }
+
+        return $enrollment;
     }
 
     /**
      * Intenta marcar una lección como completada.
      * Valida que todas las actividades obligatorias estén aprobadas.
      */
-    public function completeLesson(User $user, Lesson $lesson)
+    public function completeLesson(User $user, Lesson $lesson): UserLessonProgress
     {
         // 1. Obtener inscripción
         $enrollment = $this->startContent($user, $lesson->content);
 
         // 2. Verificar actividades obligatorias
         $activities = $lesson->activities()->where('is_mandatory', true)->get();
-        
+
         foreach ($activities as $activity) {
             $hasPassed = UserActivityAttempt::where('user_id', $user->id)
                 ->where('activity_id', $activity->id)
-                ->where('is_correct', true) 
+                ->where('is_correct', true)
                 ->exists();
 
-            if (!$hasPassed) {
+            if (! $hasPassed) {
                 throw new Exception("Debes completar y aprobar la actividad '{$activity->title}' antes de finalizar la lección.");
             }
         }
@@ -84,22 +111,19 @@ class ContentProgressService
                 // Calcular puntos y actividades finales de la lección antes de cerrar
                 $totalActivities = $lesson->activities()->count();
                 $completedActivitiesCount = UserActivityAttempt::where('user_id', $user->id)
-                        ->whereIn('activity_id', $lesson->activities()->pluck('id'))
-                        ->where('is_correct', true) 
-                        ->pluck('activity_id')
-                        ->unique()
-                        ->count();
-                
-                // Calcular puntos basados en actividades (o la lección en sí si no hay actividades puntuables)
-                // Aquí asumimos que points_earned es la suma de los puntos de las actividades + puntos base de lección
+                    ->whereIn('activity_id', $lesson->activities()->pluck('id'))
+                    ->where('is_correct', true)
+                    ->pluck('activity_id')
+                    ->unique()
+                    ->count();
+
                 $activitiesPoints = $lesson->activities()->sum('max_points');
-                $earnedPoints = $activitiesPoints; // Si completó, asumimos que ganó todo si es obligatorio, o recalcular real.
-                // Para ser más precisos, recalculamos lo ganado real:
-                $realEarnedPoints = $lesson->activities()->get()->reduce(function($carry, $act) use ($user) {
+                $realEarnedPoints = $lesson->activities()->get()->reduce(function ($carry, $act) use ($user) {
                     $passed = UserActivityAttempt::where('user_id', $user->id)
                         ->where('activity_id', $act->id)
                         ->where('is_correct', true)
                         ->exists();
+
                     return $carry + ($passed ? $act->max_points : 0);
                 }, 0);
 
@@ -117,49 +141,97 @@ class ContentProgressService
                 // Otorgar Puntos de Gamificación (Puntos base de la lección)
                 if ($lesson->points > 0) {
                     $this->gamificationService->awardPoints(
-                        $user, 
-                        $lesson->points, 
-                        Lesson::class, 
-                        $lesson->id, 
+                        $user,
+                        $lesson->points,
+                        Lesson::class,
+                        $lesson->id,
                         "Lección completada: {$lesson->title}"
                     );
                 }
 
                 // Actualizar progreso general del curso/inscripción
-                $this->updateEnrollmentProgress($enrollment);
+                $this->refreshEnrollmentProgress($enrollment);
             });
         }
-        
+
+        $progress->refresh();
+        $progress->setAttribute(
+            'achievements',
+            $this->achievementService->evaluate($user)->pluck('achievement')->values(),
+        );
+
         return $progress;
+    }
+
+    public function updateArticleProgress(
+        User $user,
+        EducationalContent $article,
+        float $readingProgress,
+        ?int $lastPosition = null,
+        int $timeSpent = 0,
+    ): UserArticleProgress {
+        if (! $article->isArticle()) {
+            throw new Exception('Este contenido no es un artículo.');
+        }
+
+        $enrollment = $this->startContent($user, $article);
+
+        return DB::transaction(function () use ($user, $article, $enrollment, $readingProgress, $lastPosition, $timeSpent): UserArticleProgress {
+            $progress = UserArticleProgress::query()
+                ->where('user_id', $user->id)
+                ->where('article_id', $article->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $percentage = min(100, max((float) $progress->reading_progress, $readingProgress));
+            $completed = $percentage >= 100;
+            $wasCompleted = $progress->status === 'completada';
+
+            $progress->update([
+                'status' => $completed ? 'completada' : 'en_progreso',
+                'reading_progress' => $percentage,
+                'last_position' => $lastPosition ?? $progress->last_position,
+                'last_accessed_at' => now(),
+                'completed_at' => $completed ? ($progress->completed_at ?? now()) : null,
+                'time_spent' => (int) $progress->time_spent + max(0, $timeSpent),
+            ]);
+            $enrollment->update([
+                'progress_percentage' => $percentage,
+                'completed_at' => $completed ? ($enrollment->completed_at ?? now()) : null,
+                'last_accessed_at' => now(),
+                'total_time_spent' => (int) $progress->fresh()->time_spent,
+                'final_score' => $completed ? 100 : null,
+            ]);
+
+            $achievements = $completed && ! $wasCompleted
+                ? $this->achievementService->evaluate($user)->pluck('achievement')->values()
+                : collect();
+
+            return $progress->refresh()->setAttribute('achievements', $achievements);
+        });
     }
 
     /**
      * Recalcula el porcentaje y estadísticas de progreso de la inscripción.
      */
-    protected function updateEnrollmentProgress(UserContentEnrollment $enrollment)
+    public function refreshEnrollmentProgress(UserContentEnrollment $enrollment): UserContentEnrollment
     {
         $totalLessons = $enrollment->content->lessons()->count();
-        
+
         if ($totalLessons > 0) {
             // Obtener todos los progresos de lecciones para esta inscripción
             $lessonProgresses = UserLessonProgress::where('enrollment_id', $enrollment->id)->get();
-            
+
             $completedLessons = $lessonProgresses->where('status', 'completada')->count();
             $percentage = ($completedLessons / $totalLessons) * 100;
-            
+
             // Calcular totales agregados
             $totalPointsEarned = $lessonProgresses->sum('points_earned');
-            $totalPointsPossible = $lessonProgresses->sum('points_possible'); // Esto suma solo de las intentadas/creadas. 
-            // Para total_points_possible real del curso, deberíamos sumar de todas las lecciones del contenido, no solo las progresadas.
-            // Pero para 'UserContentEnrollment', a veces se prefiere 'posible hasta ahora' o 'posible total'. 
-            // Vamos a usar 'posible total del curso' consultando las lecciones directamente para ser más exactos en "qué falta".
-            
             $allLessons = $enrollment->content->lessons()->with('activities')->get();
-            $courseTotalPointsPossible = $allLessons->sum(function($l) {
+            $courseTotalPointsPossible = $allLessons->sum(function ($l) {
                 return $l->points + $l->activities->sum('max_points');
             });
 
-            $totalTimeSpent = $lessonProgresses->sum('time_spent'); // Asumiendo que time_spent se trauckea en algún lado (frontend debe enviarlo)
+            $totalTimeSpent = $lessonProgresses->sum('time_spent');
 
             $updateData = [
                 'progress_percentage' => $percentage,
@@ -167,27 +239,45 @@ class ContentProgressService
                 'total_lessons' => $totalLessons,
                 'total_points_earned' => $totalPointsEarned,
                 'total_points_possible' => $courseTotalPointsPossible,
-                'total_time_spent' => $totalTimeSpent
+                'total_time_spent' => $totalTimeSpent,
             ];
-            
-            if ($percentage >= 100 && !$enrollment->completed_at) {
+
+            if ($percentage >= 100 && ! $enrollment->completed_at) {
                 $updateData['completed_at'] = Carbon::now();
-                $updateData['final_score'] = $totalPointsEarned; // Ejemplo: Score final = puntos ganados
-                
+                $updateData['final_score'] = $courseTotalPointsPossible > 0
+                    ? round(($totalPointsEarned / $courseTotalPointsPossible) * 100, 2)
+                    : 100;
+
                 // Bonus por curso completo (si existe)
                 $coursePoints = optional($enrollment->content->courseDetails)->completion_points ?? 0;
                 if ($coursePoints > 0) {
-                     $this->gamificationService->awardPoints(
-                        $enrollment->user, 
-                        $coursePoints, 
-                        EducationalContent::class, 
-                        $enrollment->content_id, 
+                    $this->gamificationService->awardPoints(
+                        $enrollment->user,
+                        $coursePoints,
+                        EducationalContent::class,
+                        $enrollment->content_id,
                         "Curso completado: {$enrollment->content->title}"
                     );
                 }
             }
 
             $enrollment->update($updateData);
+
+            if ($percentage >= 100) {
+                $achievementId = optional($enrollment->content->courseDetails)->achievement_id;
+                $achievement = $achievementId ? Achievement::find($achievementId) : null;
+
+                if ($achievement) {
+                    $this->achievementService->award($enrollment->user, $achievement, [
+                        'content_id' => $enrollment->content_id,
+                        'completed_at' => $enrollment->completed_at,
+                    ]);
+                }
+
+                $this->achievementService->evaluate($enrollment->user);
+            }
         }
+
+        return $enrollment->refresh();
     }
 }

@@ -1,11 +1,11 @@
 <?php
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\AnnouncementController;
+use App\Http\Controllers\Api\ObservationController;
+use App\Http\Controllers\Api\TaxonController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\GoogleController;
-use App\Http\Controllers\Api\TaxonController;
-use App\Http\Controllers\Api\ObservationController;
+use Illuminate\Support\Facades\Route;
 
 // Rutas de autenticación protegidas por limitador de tasa
 Route::middleware('throttle:login')->group(function () {
@@ -28,16 +28,23 @@ Route::prefix('taxa')->group(function () {
 
 // Rutas de Contenido Educativo
 use App\Http\Controllers\Api\EducationalContentController;
+use App\Http\Controllers\Api\FeedbackController;
 
 Route::prefix('educational-contents')->group(function () {
     Route::get('/', [EducationalContentController::class, 'index']);
     Route::get('/{id}', [EducationalContentController::class, 'show']);
 });
 
+Route::get('/announcements', [AnnouncementController::class, 'index']);
+Route::get('/announcements/{slug}', [AnnouncementController::class, 'show']);
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/educational-contents/{id}/start', [EducationalContentController::class, 'start']);
+    Route::patch('/educational-contents/{id}/article-progress', [EducationalContentController::class, 'updateArticleProgress']);
     Route::post('/lessons/{id}/complete', [\App\Http\Controllers\Api\LessonController::class, 'complete']);
     Route::post('/activities/{id}/attempt', [\App\Http\Controllers\Api\ActivityController::class, 'attempt']);
+    Route::post('/educational-contents/{id}/feedback', [FeedbackController::class, 'storeContent']);
+    Route::post('/feedback', [FeedbackController::class, 'storeGeneral']);
 });
 
 // ── Explorer Geográfico (GBIF proxy) ───────────────────────────────────────────
@@ -48,6 +55,7 @@ Route::get('/explorer/national', [ExplorerController::class, 'national']);
 
 // Ruta para Especies Diarias con IA
 use App\Http\Controllers\Api\DailySpeciesController;
+
 Route::get('/daily-curiosities', [DailySpeciesController::class, 'index']);
 Route::get('/daily-recommendation', [DailySpeciesController::class, 'speciesOfTheDay']);
 

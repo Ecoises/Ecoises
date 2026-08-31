@@ -2,22 +2,22 @@
 
 namespace App\Models;
 
-use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasName;
+use Filament\Panel;
+use Illuminate\Auth\Passwords\CanResetPassword as CanResetPasswordTrait;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Illuminate\Contracts\Auth\CanResetPassword;
-use Illuminate\Auth\Passwords\CanResetPassword as CanResetPasswordTrait;
-use Filament\Models\Contracts\HasName;
 use Spatie\Permission\Traits\HasRoles;
 
-
-class User extends Authenticatable implements HasName
+class User extends Authenticatable implements FilamentUser, HasName
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable, hasApiTokens, CanResetPasswordTrait, HasRoles;
+    use CanResetPasswordTrait, hasApiTokens, HasFactory, HasRoles, Notifiable;
 
     protected $appends = ['name'];
 
@@ -77,28 +77,39 @@ class User extends Authenticatable implements HasName
     {
         return $this->hasMany(Identification::class);
     }
-    
+
     public function achievements(): HasMany
     {
         return $this->hasMany(UserAchievement::class);
     }
-    
+
+    public function currentLevel(): BelongsTo
+    {
+        return $this->belongsTo(Level::class, 'level');
+    }
+
     public function pointTransactions(): HasMany
     {
         return $this->hasMany(PointTransaction::class);
     }
-    
+
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class);
     }
-    
+
     public function getFilamentName(): string
     {
         // Usamos el campo 'full_name' que tienes en tu base de datos.
         // El operador ?? 'Usuario' asegura que siempre devuelva un string
         // en caso de que 'full_name' esté nulo en algún registro.
         return $this->full_name ?? $this->email;
+    }
+
+    public function canAccessPanel(Panel $panel): bool
+    {
+        return (bool) $this->is_active
+            && $this->hasAnyRole(['super_admin', 'editor', 'educador', 'moderador']);
     }
 
     public function getNameAttribute(): ?string

@@ -9,8 +9,13 @@ use Filament\Widgets\TableWidget;
 class Leaderboards extends TableWidget
 {
     protected static ?int $sort = 5;
+
     protected static ?string $heading = 'Tabla de Posiciones';
-   
+
+    public static function canView(): bool
+    {
+        return auth()->user()?->can('View:SuperAdminDashboard') ?? false;
+    }
 
     public function table(Table $table): Table
     {
@@ -44,7 +49,7 @@ class Leaderboards extends TableWidget
             ->paginated([5, 10, 25])
             ->defaultPaginationPageOption(5)
             ->emptyStateHeading('No hay usuarios en el ranking')
-            
+
             ->emptyStateIcon('heroicon-o-users');
     }
 }

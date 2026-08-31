@@ -24,6 +24,10 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             UserSeeder::class,
             ApiConfigurationSeeder::class,
+            GamificationDefaultsSeeder::class,
+            ContentPublishingPermissionsSeeder::class,
+            DashboardPermissionsSeeder::class,
+            ModerationPermissionsSeeder::class,
             UNALLaPazCatalogSeeder::class,
             ExportRolesPermissionsSeeder::class,
         ]);

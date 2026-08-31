@@ -8,7 +8,12 @@ class UserChart extends ChartWidget
 {
     protected ?string $heading = 'Usuarios Registrados';
 
-    protected static ?int $sort = 3;    
+    protected static ?int $sort = 3;
+
+    public static function canView(): bool
+    {
+        return auth()->user()?->can('View:SuperAdminDashboard') ?? false;
+    }
 
     protected function getData(): array
     {
@@ -56,10 +61,10 @@ class UserChart extends ChartWidget
 
         // Ensure current year is always available even if no users
         $currentYear = date('Y');
-        if (!isset($years[$currentYear])) {
-             $years[$currentYear] = $currentYear;
+        if (! isset($years[$currentYear])) {
+            $years[$currentYear] = $currentYear;
         }
-        
+
         // Sort keys desc just in case
         krsort($years);
 
@@ -68,7 +73,7 @@ class UserChart extends ChartWidget
 
     public ?string $filter = null; // Will default to first item in getFilters logic or we can set it explicitly
 
-    public function mount(): void 
+    public function mount(): void
     {
         // Set default filter to current year
         $this->filter = (string) now()->year;
