@@ -29,6 +29,7 @@ Route::prefix('taxa')->group(function () {
 // Rutas de Contenido Educativo
 use App\Http\Controllers\Api\EducationalContentController;
 use App\Http\Controllers\Api\FeedbackController;
+use App\Http\Controllers\Api\LearningDashboardController;
 
 Route::prefix('educational-contents')->group(function () {
     Route::get('/', [EducationalContentController::class, 'index']);
@@ -45,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/activities/{id}/attempt', [\App\Http\Controllers\Api\ActivityController::class, 'attempt']);
     Route::post('/educational-contents/{id}/feedback', [FeedbackController::class, 'storeContent']);
     Route::post('/feedback', [FeedbackController::class, 'storeGeneral']);
+    Route::get('/learning/dashboard', [LearningDashboardController::class, 'show']);
 });
 
 // ── Explorer Geográfico (GBIF proxy) ───────────────────────────────────────────

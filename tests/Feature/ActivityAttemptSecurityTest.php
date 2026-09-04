@@ -37,7 +37,9 @@ class ActivityAttemptSecurityTest extends TestCase
             $table->string('title');
             $table->string('slug')->unique();
             $table->text('description')->nullable();
+            $table->string('thumbnail_url')->nullable();
             $table->foreignId('author_id');
+            $table->string('difficulty_level')->default('principiante');
             $table->integer('estimated_duration')->default(0);
             $table->boolean('is_published')->default(false);
             $table->boolean('is_featured')->default(false);
@@ -425,6 +427,36 @@ class ActivityAttemptSecurityTest extends TestCase
             'content_id' => $article->id,
             'progress_percentage' => 100,
         ]);
+    }
+
+    public function test_learning_dashboard_summarizes_progress_without_exposing_answers(): void
+    {
+        $user = $this->user();
+        Level::create(['name' => 'Explorador', 'min_points' => 0, 'is_active' => true]);
+        Level::create(['name' => 'Naturalista', 'min_points' => 100, 'is_active' => true]);
+        $user->update(['total_score' => 35]);
+        $content = EducationalContent::create([
+            'content_type' => EducationalContent::TYPE_ARTICLE,
+            'title' => 'Bosques secos',
+            'slug' => 'bosques-secos-dashboard',
+            'description' => 'Aprendizaje sobre el bosque seco tropical.',
+            'author_id' => $user->id,
+            'status' => EducationalContent::STATUS_PUBLISHED,
+            'is_published' => true,
+            'published_at' => now(),
+        ]);
+        Sanctum::actingAs($user);
+        $this->postJson("/api/educational-contents/{$content->slug}/start")->assertOk();
+
+        $this->getJson('/api/learning/dashboard')
+            ->assertOk()
+            ->assertJsonPath('learner.total_points', 35)
+            ->assertJsonPath('learner.next_level.name', 'Naturalista')
+            ->assertJsonPath('learner.next_level.points_remaining', 65)
+            ->assertJsonPath('stats.enrolled', 1)
+            ->assertJsonPath('stats.in_progress', 1)
+            ->assertJsonPath('continue_learning.0.content.slug', 'bosques-secos-dashboard')
+            ->assertJsonMissingPath('continue_learning.0.correct_answers');
     }
 
     /** @return array{User, Activity, Lesson} */
