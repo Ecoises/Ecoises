@@ -128,4 +128,9 @@ class User extends Authenticatable implements FilamentUser, HasName
     {
         return $this->hasMany(EducationalContent::class, 'author_id');
     }
+
+    public function certificates(): HasMany
+    {
+        return $this->hasMany(UserCertificate::class);
+    }
 }

@@ -19,6 +19,7 @@ class ContentProgressService
     public function __construct(
         protected GamificationService $gamificationService,
         protected AchievementService $achievementService,
+        protected CertificateService $certificateService,
     ) {}
 
     /**
@@ -34,6 +35,8 @@ class ContentProgressService
      */
     public function startContent(User $user, EducationalContent $content): UserContentEnrollment
     {
+        $this->ensurePrerequisitesAreCompleted($user, $content);
+
         $enrollment = UserContentEnrollment::firstOrCreate(
             [
                 'user_id' => $user->id,
@@ -275,9 +278,44 @@ class ContentProgressService
                 }
 
                 $this->achievementService->evaluate($enrollment->user);
+                $this->certificateService->issueFor($enrollment->fresh(['content.courseDetails']));
             }
         }
 
         return $enrollment->refresh();
+    }
+
+    private function ensurePrerequisitesAreCompleted(User $user, EducationalContent $content): void
+    {
+        if (! $content->isCourse()) {
+            return;
+        }
+
+        $requiredIds = collect($content->courseDetails?->prerequisite_content_ids)
+            ->filter(fn ($id): bool => is_numeric($id) && (int) $id !== $content->id)
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($requiredIds->isEmpty()) {
+            return;
+        }
+
+        $completedIds = UserContentEnrollment::query()
+            ->where('user_id', $user->id)
+            ->whereIn('content_id', $requiredIds)
+            ->whereNotNull('completed_at')
+            ->pluck('content_id');
+        $missingIds = $requiredIds->diff($completedIds);
+
+        if ($missingIds->isEmpty()) {
+            return;
+        }
+
+        $titles = EducationalContent::query()->whereIn('id', $missingIds)->pluck('title')->implode(', ');
+
+        throw \Illuminate\Validation\ValidationException::withMessages([
+            'prerequisites' => 'Antes debes completar: '.($titles ?: 'los contenidos requeridos').'.',
+        ]);
     }
 }

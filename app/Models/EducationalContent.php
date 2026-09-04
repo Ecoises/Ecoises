@@ -100,6 +100,11 @@ class EducationalContent extends Model
         return $this->hasMany(EducationalContentVersion::class, 'content_id')->latest('version_number');
     }
 
+    public function certificates(): HasMany
+    {
+        return $this->hasMany(UserCertificate::class, 'content_id');
+    }
+
     // Detail Relationships
     public function courseDetails(): HasOne
     {

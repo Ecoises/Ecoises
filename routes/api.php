@@ -27,6 +27,7 @@ Route::prefix('taxa')->group(function () {
 });
 
 // Rutas de Contenido Educativo
+use App\Http\Controllers\Api\CertificateController;
 use App\Http\Controllers\Api\EducationalContentController;
 use App\Http\Controllers\Api\FeedbackController;
 use App\Http\Controllers\Api\LearningDashboardController;
@@ -38,6 +39,7 @@ Route::prefix('educational-contents')->group(function () {
 
 Route::get('/announcements', [AnnouncementController::class, 'index']);
 Route::get('/announcements/{slug}', [AnnouncementController::class, 'show']);
+Route::get('/certificates/{verificationCode}', [CertificateController::class, 'show']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/educational-contents/{id}/start', [EducationalContentController::class, 'start']);
@@ -47,6 +49,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/educational-contents/{id}/feedback', [FeedbackController::class, 'storeContent']);
     Route::post('/feedback', [FeedbackController::class, 'storeGeneral']);
     Route::get('/learning/dashboard', [LearningDashboardController::class, 'show']);
+    Route::get('/my/certificates', [CertificateController::class, 'index']);
 });
 
 // ── Explorer Geográfico (GBIF proxy) ───────────────────────────────────────────

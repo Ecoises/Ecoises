@@ -83,6 +83,17 @@ class LearningDashboardController extends Controller
                 ->latest()
                 ->limit(8)
                 ->get(['id', 'points', 'transaction_type', 'description', 'created_at']),
+            'certificates' => $user->certificates()
+                ->whereNull('revoked_at')
+                ->with('content:id,title,slug')
+                ->latest('issued_at')
+                ->get()
+                ->map(fn ($certificate): array => [
+                    'verification_code' => $certificate->verification_code,
+                    'content_title' => $certificate->content?->title,
+                    'final_score' => $certificate->final_score,
+                    'issued_at' => $certificate->issued_at,
+                ]),
         ]);
     }
 

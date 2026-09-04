@@ -93,6 +93,8 @@ class ActivityAttemptSecurityTest extends TestCase
             $table->unsignedBigInteger('id')->primary();
             $table->integer('completion_points')->default(100);
             $table->unsignedBigInteger('achievement_id')->nullable();
+            $table->boolean('has_certificate')->default(false);
+            $table->json('prerequisite_content_ids')->nullable();
         });
 
         Schema::create('article_details', function (Blueprint $table): void {
@@ -239,6 +241,19 @@ class ActivityAttemptSecurityTest extends TestCase
             $table->timestamps();
             $table->unique(['user_id', 'achievement_id']);
         });
+
+        Schema::create('user_certificates', function (Blueprint $table): void {
+            $table->id();
+            $table->uuid('verification_code')->unique();
+            $table->foreignId('user_id');
+            $table->foreignId('content_id');
+            $table->foreignId('enrollment_id');
+            $table->decimal('final_score', 5, 2)->nullable();
+            $table->timestamp('issued_at');
+            $table->timestamp('revoked_at')->nullable();
+            $table->timestamps();
+            $table->unique(['user_id', 'content_id']);
+        });
     }
 
     public function test_the_public_payload_does_not_expose_the_correct_answer(): void
@@ -370,6 +385,7 @@ class ActivityAttemptSecurityTest extends TestCase
         $lesson->content->courseDetails()->create([
             'completion_points' => 100,
             'achievement_id' => $achievement->id,
+            'has_certificate' => true,
         ]);
         Sanctum::actingAs($user);
         $option = app(ActivityEvaluationService::class)->publicPayload($activity)['options'][0];
@@ -393,6 +409,53 @@ class ActivityAttemptSecurityTest extends TestCase
             'total_points_possible' => 35,
             'final_score' => 100,
         ]);
+        $this->assertDatabaseCount('user_certificates', 1);
+        $verificationCode = \App\Models\UserCertificate::first()->verification_code;
+        $this->getJson("/api/certificates/{$verificationCode}")
+            ->assertOk()
+            ->assertJsonPath('is_valid', true)
+            ->assertJsonPath('learner_name', $user->full_name);
+    }
+
+    public function test_course_prerequisites_are_enforced_before_enrollment(): void
+    {
+        $user = $this->user();
+        $prerequisite = EducationalContent::create([
+            'content_type' => EducationalContent::TYPE_COURSE,
+            'title' => 'Fundamentos de biodiversidad',
+            'slug' => 'fundamentos-biodiversidad',
+            'author_id' => $user->id,
+            'status' => EducationalContent::STATUS_PUBLISHED,
+            'is_published' => true,
+            'published_at' => now(),
+        ]);
+        $course = EducationalContent::create([
+            'content_type' => EducationalContent::TYPE_COURSE,
+            'title' => 'Restauración avanzada',
+            'slug' => 'restauracion-avanzada',
+            'author_id' => $user->id,
+            'status' => EducationalContent::STATUS_PUBLISHED,
+            'is_published' => true,
+            'published_at' => now(),
+        ]);
+        $course->courseDetails()->create([
+            'completion_points' => 100,
+            'prerequisite_content_ids' => [$prerequisite->id],
+        ]);
+        Sanctum::actingAs($user);
+
+        $this->postJson("/api/educational-contents/{$course->slug}/start")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('prerequisites');
+
+        \App\Models\UserContentEnrollment::create([
+            'user_id' => $user->id,
+            'content_id' => $prerequisite->id,
+            'completed_at' => now(),
+            'progress_percentage' => 100,
+        ]);
+
+        $this->postJson("/api/educational-contents/{$course->slug}/start")->assertOk();
     }
 
     public function test_article_progress_is_persistent_monotonic_and_completes_its_enrollment(): void

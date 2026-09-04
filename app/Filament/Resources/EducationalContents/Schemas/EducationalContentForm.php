@@ -143,6 +143,26 @@ class EducationalContentForm
                                         ->visible(fn (Get $get) => $get('content_type') === 'course')
                                         ->default(100),
 
+                                    Toggle::make('course_details.has_certificate')
+                                        ->label('Emitir certificado al completar')
+                                        ->helperText('Se genera un certificado verificable cuando el estudiante termina el curso.')
+                                        ->visible(fn (Get $get) => $get('content_type') === 'course')
+                                        ->default(false),
+
+                                    Select::make('course_details.prerequisite_content_ids')
+                                        ->label('Contenidos prerrequisito')
+                                        ->helperText('El estudiante deberá completarlos antes de iniciar este curso.')
+                                        ->options(fn (): array => EducationalContent::query()
+                                            ->where('content_type', EducationalContent::TYPE_COURSE)
+                                            ->published()
+                                            ->orderBy('title')
+                                            ->pluck('title', 'id')
+                                            ->all())
+                                        ->multiple()
+                                        ->searchable()
+                                        ->preload()
+                                        ->visible(fn (Get $get) => $get('content_type') === 'course'),
+
                                     TextInput::make('article_details.read_time')
                                         ->label('Tiempo de lectura (min)')
                                         ->numeric()
