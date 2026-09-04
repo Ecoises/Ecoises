@@ -108,6 +108,30 @@ class EducationalContentCoreTest extends TestCase
             $table->foreignId('category_id');
             $table->foreignId('content_id');
         });
+
+        Schema::create('activities', function (Blueprint $table): void {
+            $table->id();
+            $table->nullableMorphs('activitable');
+            $table->string('title');
+            $table->unsignedInteger('activity_order')->default(0);
+            $table->string('activity_type');
+            $table->json('content_data')->nullable();
+            $table->json('correct_answers')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('educational_content_versions', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('content_id');
+            $table->unsignedInteger('version_number');
+            $table->foreignId('created_by')->nullable();
+            $table->string('event');
+            $table->string('change_summary')->nullable();
+            $table->char('snapshot_hash', 64);
+            $table->json('snapshot');
+            $table->timestamps();
+            $table->unique(['content_id', 'version_number']);
+        });
     }
 
     public function test_a_new_draft_has_no_premature_subtype_structure(): void
@@ -271,6 +295,15 @@ class EducationalContentCoreTest extends TestCase
         $this->assertSame(EducationalContent::STATUS_REVIEWED, $reviewedStatus);
         $this->assertSame(EducationalContent::STATUS_PUBLISHED, $published->status);
         $this->assertTrue($published->isPublished());
+        $this->assertSame([1, 2, 3], $published->versions()->reorder('version_number')->pluck('version_number')->all());
+        $this->assertSame(
+            ['submitted', 'reviewed', 'published'],
+            $published->versions()->reorder('version_number')->pluck('event')->all(),
+        );
+        $this->assertSame(
+            'Restauración ecológica comunitaria',
+            $published->versions()->orderByDesc('version_number')->first()->snapshot['content']['title'],
+        );
     }
 
     private function author(): User

@@ -95,6 +95,11 @@ class EducationalContent extends Model
         return $this->hasMany(EducationalContentAsset::class, 'content_id')->orderBy('asset_order');
     }
 
+    public function versions(): HasMany
+    {
+        return $this->hasMany(EducationalContentVersion::class, 'content_id')->latest('version_number');
+    }
+
     // Detail Relationships
     public function courseDetails(): HasOne
     {

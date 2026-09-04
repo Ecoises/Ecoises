@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\EducationalContent;
+use App\Models\EducationalContentVersion;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -11,6 +12,7 @@ class EducationalContentPublicationService
 {
     public function __construct(
         private readonly EducationalWorkflowNotificationService $notifications,
+        private readonly EducationalContentVersionService $versions,
     ) {}
 
     public function submitForReview(EducationalContent $content): EducationalContent
@@ -28,6 +30,8 @@ class EducationalContentPublicationService
             'published_at' => null,
         ])->save();
 
+        $this->versions->capture($content->refresh(), EducationalContentVersion::EVENT_SUBMITTED);
+
         $this->notifications->submittedForReview($content->refresh()->load('author'));
 
         return $content->refresh();
@@ -43,6 +47,8 @@ class EducationalContentPublicationService
 
         $content->forceFill(['status' => EducationalContent::STATUS_REVIEWED])->save();
 
+        $this->versions->capture($content->refresh(), EducationalContentVersion::EVENT_REVIEWED);
+
         $this->notifications->reviewed($content->refresh()->load('author'));
 
         return $content->refresh();
@@ -55,6 +61,8 @@ class EducationalContentPublicationService
             'is_published' => false,
             'published_at' => null,
         ])->save();
+
+        $this->versions->capture($content->refresh(), EducationalContentVersion::EVENT_RETURNED);
 
         $this->notifications->returnedToDraft($content->refresh()->load('author'));
 
@@ -85,6 +93,8 @@ class EducationalContentPublicationService
                 'published_at' => now(),
             ])->save();
 
+            $this->versions->capture($content->refresh(), EducationalContentVersion::EVENT_PUBLISHED);
+
             return $content->refresh();
         });
 
@@ -108,6 +118,8 @@ class EducationalContentPublicationService
                 'is_published' => false,
                 'published_at' => null,
             ])->save();
+
+            $this->versions->capture($content->refresh(), EducationalContentVersion::EVENT_UNPUBLISHED);
 
             return $content->refresh();
         });

@@ -2,21 +2,21 @@
 
 namespace App\Filament\Resources\EducationalContents;
 
-use App\Models\EducationalContent;
-use BackedEnum;
-use UnitEnum;
 use App\Filament\Resources\EducationalContents\Pages\CreateEducationalContent;
 use App\Filament\Resources\EducationalContents\Pages\EditEducationalContent;
 use App\Filament\Resources\EducationalContents\Pages\ListEducationalContents;
 use App\Filament\Resources\EducationalContents\Pages\ViewEducationalContent;
+use App\Filament\Resources\EducationalContents\RelationManagers\VersionsRelationManager;
 use App\Filament\Resources\EducationalContents\Schemas\EducationalContentForm;
 use App\Filament\Resources\EducationalContents\Schemas\EducationalContentInfolist;
 use App\Filament\Resources\EducationalContents\Tables\EducationalContentsTable;
-
+use App\Models\EducationalContent;
+use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class EducationalContentResource extends Resource
 {
@@ -24,7 +24,7 @@ class EducationalContentResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedAcademicCap;
 
-    protected static string | UnitEnum | null $navigationGroup = 'Gestión de Contenido';
+    protected static string|UnitEnum|null $navigationGroup = 'Gestión de Contenido';
 
     protected static ?string $navigationLabel = 'Contenido Educativo';
 
@@ -57,7 +57,7 @@ class EducationalContentResource extends Resource
     public static function getRelations(): array
     {
         return [
-            // No relations needed here as we embed them in the Wizard or Repeater
+            VersionsRelationManager::class,
         ];
     }
 
@@ -70,6 +70,7 @@ class EducationalContentResource extends Resource
             'edit' => EditEducationalContent::route('/{record}/edit'),
         ];
     }
+
     public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
     {
         $query = parent::getEloquentQuery();
