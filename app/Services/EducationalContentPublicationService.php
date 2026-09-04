@@ -9,6 +9,10 @@ use Illuminate\Validation\ValidationException;
 
 class EducationalContentPublicationService
 {
+    public function __construct(
+        private readonly EducationalWorkflowNotificationService $notifications,
+    ) {}
+
     public function submitForReview(EducationalContent $content): EducationalContent
     {
         $content->loadMissing(['articleDetails', 'courseDetails', 'lessons', 'assets']);
@@ -24,6 +28,8 @@ class EducationalContentPublicationService
             'published_at' => null,
         ])->save();
 
+        $this->notifications->submittedForReview($content->refresh()->load('author'));
+
         return $content->refresh();
     }
 
@@ -37,6 +43,8 @@ class EducationalContentPublicationService
 
         $content->forceFill(['status' => EducationalContent::STATUS_REVIEWED])->save();
 
+        $this->notifications->reviewed($content->refresh()->load('author'));
+
         return $content->refresh();
     }
 
@@ -47,6 +55,8 @@ class EducationalContentPublicationService
             'is_published' => false,
             'published_at' => null,
         ])->save();
+
+        $this->notifications->returnedToDraft($content->refresh()->load('author'));
 
         return $content->refresh();
     }
@@ -61,7 +71,7 @@ class EducationalContentPublicationService
             throw ValidationException::withMessages($errors);
         }
 
-        return DB::transaction(function () use ($content): EducationalContent {
+        $published = DB::transaction(function () use ($content): EducationalContent {
             if ($content->isCourse()) {
                 $content->lessons()->update([
                     'status' => EducationalContent::STATUS_PUBLISHED,
@@ -77,11 +87,15 @@ class EducationalContentPublicationService
 
             return $content->refresh();
         });
+
+        $this->notifications->published($published->load('author'));
+
+        return $published;
     }
 
     public function unpublish(EducationalContent $content): EducationalContent
     {
-        return DB::transaction(function () use ($content): EducationalContent {
+        $unpublished = DB::transaction(function () use ($content): EducationalContent {
             if ($content->isCourse()) {
                 $content->lessons()->update([
                     'status' => EducationalContent::STATUS_DRAFT,
@@ -97,6 +111,10 @@ class EducationalContentPublicationService
 
             return $content->refresh();
         });
+
+        $this->notifications->unpublished($unpublished->load('author'));
+
+        return $unpublished;
     }
 
     /** @return array<string, array<int, string>> */
