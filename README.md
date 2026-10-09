@@ -88,6 +88,12 @@ Regla general: **los controladores validan y responden; la lógica vive en `Serv
   (`TaxonCatalogService`).
 - Las listas **nunca** llaman a APIs externas durante la petición: si una especie está incompleta se encola
   `EnrichSpeciesJob`. Solo la ficha individual consulta iNaturalist en línea cuando no tiene datos suficientes.
+- **Importancia ecológica** (`EcologicalImportanceService`): se arma con las interacciones publicadas en
+  [GloBI](https://www.globalbioticinteractions.org) (qué come, qué poliniza, de qué plantas dispersa
+  semillas, quién la depreda). Es gratis y propia de cada especie. Se descarga en la cola
+  (`SyncSpeciesInteractionsJob`) la primera vez que alguien abre la ficha y se renueva cada 6 meses.
+  Un rol solo se afirma si hay suficientes registros, y las especies relacionadas que ya están en el
+  catálogo aparecen con su nombre común y un enlace a su ficha.
 - `TaxonSyncService` es el único lugar donde un payload de iNaturalist se convierte en un registro local.
   Las reglas de procedencia (nombre común, nativa/endémica/introducida y conservación) viven ahí,
   en `EstablishmentStatusResolver` y en `ConservationStatusResolver`.

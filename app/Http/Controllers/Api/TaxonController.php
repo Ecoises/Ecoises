@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\EnrichSpeciesEcologyJob;
+use App\Jobs\SyncSpeciesInteractionsJob;
 use App\Models\Taxa;
+use App\Services\Biodiversity\EcologicalImportanceService;
 use App\Services\Biodiversity\TaxonCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +17,10 @@ use Illuminate\Http\Request;
  */
 class TaxonController extends Controller
 {
-    public function __construct(private readonly TaxonCatalogService $catalog) {}
+    public function __construct(
+        private readonly TaxonCatalogService $catalog,
+        private readonly EcologicalImportanceService $ecology,
+    ) {}
 
     /**
      * GET /taxa/search?q= — buscador por nombre (lo usa el formulario de avistamientos).
@@ -54,10 +59,13 @@ class TaxonController extends Controller
 
         $this->queueEcologyIfStale($taxon);
 
+        $data = $request->boolean('enrich', true) ? $taxon->enriched_data : $taxon->toArray();
+        $data['ecological_importance'] = $this->ecology->present($taxon);
+
         return response()->json([
             'success' => true,
             'message' => 'Taxón obtenido correctamente',
-            'data' => $request->boolean('enrich', true) ? $taxon->enriched_data : $taxon,
+            'data' => $data,
             'meta' => ['source' => $source],
         ]);
     }
@@ -95,8 +103,8 @@ class TaxonController extends Controller
     }
 
     /**
-     * La ecología (EOL) se completa en segundo plano: la API de EOL puede
-     * tardar hasta 30 s y no debe bloquear la ficha.
+     * La ecología (EOL) y las interacciones (GloBI) se completan en segundo
+     * plano: esas APIs pueden tardar varios segundos y no deben bloquear la ficha.
      */
     private function queueEcologyIfStale(Taxa $taxon): void
     {
@@ -104,6 +112,10 @@ class TaxonController extends Controller
 
         if (! $eol?->last_verified_at || $eol->last_verified_at->lt(now()->subMonths(6))) {
             EnrichSpeciesEcologyJob::dispatch($taxon->id);
+        }
+
+        if ($this->ecology->needsSync($taxon)) {
+            SyncSpeciesInteractionsJob::dispatch($taxon->id);
         }
     }
 }
