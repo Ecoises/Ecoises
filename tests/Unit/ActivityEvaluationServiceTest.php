@@ -3,7 +3,7 @@
 namespace Tests\Unit;
 
 use App\Models\Activity;
-use App\Services\ActivityEvaluationService;
+use App\Services\Learning\ActivityEvaluationService;
 use Tests\TestCase;
 
 class ActivityEvaluationServiceTest extends TestCase

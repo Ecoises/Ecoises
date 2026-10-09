@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Services\Api\INaturalistService;
+use App\Services\ExternalApi\INaturalistService;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;

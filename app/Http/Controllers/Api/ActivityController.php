@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
-use App\Services\ActivityAttemptService;
+use App\Services\Learning\ActivityAttemptService;
 use Illuminate\Http\Request;
 
 class ActivityController extends Controller

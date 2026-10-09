@@ -44,7 +44,7 @@ class DailySpeciesController extends Controller
         // If we don't have enough candidates, we might return less or handle it. 
         // For now, let's proceed with whatever we have.
         
-        $apiKey = env('GOOGLE_AI_STUDIO_KEY');
+        $apiKey = config('services.google.gemini_key');
         $model = "gemini-3-flash-preview"; // Exactly what the user asked for.
 
         $results = [];

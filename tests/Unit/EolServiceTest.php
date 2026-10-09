@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Services\Api\EolService;
+use App\Services\ExternalApi\EolService;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 

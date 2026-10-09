@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Taxa;
 use App\Models\TaxonApiReference;
-use App\Services\Api\EolService;
+use App\Services\ExternalApi\EolService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;

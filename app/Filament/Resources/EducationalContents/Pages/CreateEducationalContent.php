@@ -3,7 +3,7 @@
 namespace App\Filament\Resources\EducationalContents\Pages;
 
 use App\Filament\Resources\EducationalContents\EducationalContentResource;
-use App\Services\EducationalDraftService;
+use App\Services\Editorial\EducationalDraftService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;

@@ -1,61 +1,133 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# EcoIses · API y panel de administración
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Backend de **EcoIses**, la plataforma de educación y divulgación de la biodiversidad colombiana.
+Expone una API REST (Laravel 12 + Sanctum) que consume el frontend React (`Ecoises-app`) y un panel de
+administración en `/admin` hecho con Filament.
 
-## About Laravel
+## Puesta en marcha (Laragon)
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+```bash
+composer install
+cp .env.example .env        # ajusta DB_* si hace falta
+php artisan key:generate
+php artisan migrate
+php artisan storage:link
+```
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Laragon sirve el proyecto en `http://biodiversidad-api.test` (API en `/api`, panel en `/admin`).
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### El worker de colas (obligatorio)
 
-## Learning Laravel
+El enriquecimiento de especies (fotos, taxonomía y ecología de GBIF, iNaturalist y EOL) se hace en
+segundo plano en la cola `species-sync`. Sin un worker escuchando **las dos colas**, las especies nuevas se
+quedan sin foto y las tareas se acumulan:
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+```bash
+composer queue
+# equivale a: php artisan queue:work --queue=default,species-sync --tries=3 --timeout=120
+```
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+En Laragon puedes dejarlo siempre encendido con *Menú › Procfile* añadiendo:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```
+ecoises-queue: php C:/laragon/www/biodiversidad-api/artisan queue:work --queue=default,species-sync --tries=3
+```
 
-## Laravel Sponsors
+### Velocidad en local
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+| Qué | Cómo | Efecto medido |
+|---|---|---|
+| Cachés de Laravel y Filament | `composer speed` (y `composer speed:clear` para deshacer) | ~3,3 s → ~0,85 s por petición |
+| OPcache de PHP | Laragon › PHP › php.ini: `opcache.enable=1` | el mayor salto; recomendado |
+| Logs | `LOG_LEVEL=warning` en `.env` | menos escritura en disco |
+| Caché | `CACHE_STORE=file` en `.env` | menos consultas a MySQL |
 
-### Premium Partners
+Si cambias rutas o vistas después de `composer speed`, vuelve a ejecutarlo. No se cachea la configuración
+para que los tests sigan usando SQLite en memoria.
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+## Pruebas
 
-## Contributing
+```bash
+composer test
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Los tests usan SQLite en memoria y construyen solo las tablas que necesitan (no ejecutan las migraciones,
+que tienen sentencias exclusivas de MySQL).
 
-## Code of Conduct
+## Cómo está organizado
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```
+app/
+├── Console/Commands/        Tareas de mantenimiento (backfill del catálogo, recálculo de conservación…)
+├── Filament/                Panel /admin: recursos, páginas y widgets
+├── Http/Controllers/
+│   ├── Api/                 Un controlador por recurso de la API
+│   └── Auth/                Registro, login, Google, recuperación de contraseña
+├── Jobs/                    Trabajos en cola (enriquecimiento de especies, audio)
+├── Models/                  Modelos Eloquent
+├── Policies/                Permisos del panel (Filament Shield)
+└── Services/                Lógica de negocio, agrupada por dominio:
+    ├── Biodiversity/        Catálogo de especies, explorador geográfico, estatus y conservación
+    ├── ExternalApi/         Clientes HTTP de GBIF, iNaturalist y EOL (con caché)
+    ├── Learning/            Progreso, evaluación de actividades y certificados
+    ├── Editorial/           Borradores, versiones y publicación de contenidos y anuncios
+    ├── Gamification/        Puntos, niveles, logros y retos de campo
+    ├── Moderation/          Notificaciones de reportes
+    └── Audio/               Narración con ElevenLabs y Gemini
+```
 
-## Security Vulnerabilities
+Regla general: **los controladores validan y responden; la lógica vive en `Services/`.**
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Módulos
 
-## License
+### Biodiversidad
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- `GET /api/explorer/nearby` y `/api/explorer/national`: catálogo geográfico. GBIF dice qué especies hay
+  en la zona y el catálogo local (`taxa`) aporta nombres, fotos y estatus (`ExplorerService`).
+- `GET /api/taxa/search`, `/api/taxa/{id}`, `/related`, `/observations`: fichas del catálogo local
+  (`TaxonCatalogService`).
+- Las listas **nunca** llaman a APIs externas durante la petición: si una especie está incompleta se encola
+  `EnrichSpeciesJob`. Solo la ficha individual consulta iNaturalist en línea cuando no tiene datos suficientes.
+- `TaxonSyncService` es el único lugar donde un payload de iNaturalist se convierte en un registro local.
+  Las reglas de procedencia (nombre común, nativa/endémica/introducida y conservación) viven ahí,
+  en `EstablishmentStatusResolver` y en `ConservationStatusResolver`.
+
+### Retos de campo (avistamientos)
+
+Los avistamientos ya no son una red social: son la **evidencia de los retos**.
+
+1. En el panel (*Gamificación › Retos de campo*) se crea un reto: especie, avistamientos necesarios,
+   puntos e insignia opcional.
+2. El usuario lo ve en `GET /api/challenges` y sube su avistamiento con `POST /api/observations`
+   enviando `challenge_id`, la especie y la foto.
+3. `ChallengeService` valida que el reto esté vigente, que la especie coincida y que haya foto, y aprueba
+   la evidencia. Al llegar a la meta otorga los puntos **una sola vez** y la insignia.
+4. En *Gamificación › Evidencias de retos* un moderador puede rechazar una evidencia; si el usuario baja de
+   la meta, los puntos se revierten.
+
+Un avistamiento sin reto se guarda, pero no da puntos.
+
+### Aprendizaje
+
+Contenidos (`educational_content`) de tipo curso, artículo o recurso, con flujo editorial
+`draft → pending → reviewed → published`, versiones, lecciones, actividades evaluadas en el servidor,
+progreso, prerrequisitos y certificados verificables.
+
+### Gamificación
+
+`GamificationService` otorga y revierte puntos de forma idempotente (`point_transactions`) y sube de nivel
+(`levels`). `AchievementService` evalúa logros por tipo de requisito: actividades, lecciones, cursos,
+artículos, puntos, retos completados y especies observadas.
+
+## Permisos del panel
+
+Los recursos usan Filament Shield. `super_admin` ve todo. Para dar acceso a editores o moderadores a los
+recursos nuevos (Retos, Evidencias, Niveles), genera los permisos y asígnalos en *Roles*:
+
+```bash
+php artisan shield:generate --resource=ChallengeResource,ChallengeEvidenceResource,LevelResource --ignore-existing-policies --panel=admin
+```
+
+## Documentación anterior
+
+Las notas de fases previas del proyecto están en [`docs/historial/`](docs/historial/).

@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\EducationalContent;
-use App\Services\ActivityEvaluationService;
-use App\Services\ContentProgressService;
+use App\Services\Learning\ActivityEvaluationService;
+use App\Services\Learning\ContentProgressService;
 use Illuminate\Http\Request;
 use Laravel\Sanctum\PersonalAccessToken;
 

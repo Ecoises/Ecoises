@@ -4,8 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\EducationalContent;
 use App\Models\User;
-use App\Services\EducationalContentPublicationService;
-use App\Services\EducationalDraftService;
+use App\Services\Editorial\EducationalContentPublicationService;
+use App\Services\Editorial\EducationalDraftService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;

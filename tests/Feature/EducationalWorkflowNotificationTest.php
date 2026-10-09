@@ -4,7 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\EducationalContent;
 use App\Models\User;
-use App\Services\EducationalWorkflowNotificationService;
+use App\Services\Editorial\EducationalWorkflowNotificationService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;

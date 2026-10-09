@@ -39,6 +39,8 @@ return [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI'),
+        // Gemini (curiosidades diarias)
+        'gemini_key' => env('GOOGLE_AI_STUDIO_KEY'),
     ],
     'inaturalist' => [
         'base_url' => env('INATURALIST_BASE_URL', 'https://api.inaturalist.org/v1'),
@@ -59,9 +61,6 @@ return [
     'wikipedia' => [
         'base_url' => env('WIKIPEDIA_BASE_URL', 'https://es.wikipedia.org/api/rest_v1'),
         'timeout' => (int) env('WIKIPEDIA_TIMEOUT', 15),
-    ],
-    'google' => [
-        'gemini_key' => env('GOOGLE_AI_STUDIO_KEY'),
     ],
     'elevenlabs' => [
         'api_key' => env('ELEVENLABS_API_KEY'),

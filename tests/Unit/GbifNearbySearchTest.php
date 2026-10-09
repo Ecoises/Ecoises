@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Services\Api\GbifService;
+use App\Services\ExternalApi\GbifService;
 use Tests\TestCase;
 
 class GbifNearbySearchTest extends TestCase

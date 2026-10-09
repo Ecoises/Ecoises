@@ -29,7 +29,7 @@ class GoogleController extends Controller
         try {
             // Inicializa el cliente de Google con tu ID de Cliente
             // Asegúrate de que GOOGLE_CLIENT_ID esté en tu archivo .env de Laravel
-            $client = new Client(['client_id' => env('GOOGLE_CLIENT_ID')]);
+            $client = new Client(['client_id' => config('services.google.client_id')]);
             // Verifica el ID Token. Esto también valida la firma y la fecha de expiración.
             $payload = $client->verifyIdToken($googleIdToken);
 

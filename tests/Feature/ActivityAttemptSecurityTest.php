@@ -8,7 +8,7 @@ use App\Models\EducationalContent;
 use App\Models\Lesson;
 use App\Models\Level;
 use App\Models\User;
-use App\Services\ActivityEvaluationService;
+use App\Services\Learning\ActivityEvaluationService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;

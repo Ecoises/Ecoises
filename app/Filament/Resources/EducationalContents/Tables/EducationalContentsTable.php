@@ -3,7 +3,7 @@
 namespace App\Filament\Resources\EducationalContents\Tables;
 
 use App\Models\EducationalContent;
-use App\Services\EducationalContentPublicationService;
+use App\Services\Editorial\EducationalContentPublicationService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;

@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Services\ExplorerService;
+use App\Services\Biodiversity\ExplorerService;
 use Mockery;
 use Tests\TestCase;
 

@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\EducationalContent;
 use App\Models\Report;
 use App\Models\UserContentEnrollment;
-use App\Services\ModerationNotificationService;
+use App\Services\Moderation\ModerationNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;

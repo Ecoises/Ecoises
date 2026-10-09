@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Services\Api\BaseApiService;
+use App\Services\ExternalApi\BaseApiService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Test;

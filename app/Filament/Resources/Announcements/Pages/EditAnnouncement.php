@@ -4,7 +4,7 @@ namespace App\Filament\Resources\Announcements\Pages;
 
 use App\Filament\Resources\Announcements\AnnouncementResource;
 use App\Models\Announcement;
-use App\Services\AnnouncementPublicationService;
+use App\Services\Editorial\AnnouncementPublicationService;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;

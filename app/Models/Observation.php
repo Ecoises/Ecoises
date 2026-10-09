@@ -27,7 +27,19 @@ class Observation extends Model
         'notes',
         'is_public',
         'points_awarded',
+        'challenge_id',
+        'verification_status',
+        'reviewed_by',
+        'reviewed_at',
+        'review_note',
     ];
+
+    // Estado de verificación cuando el avistamiento es evidencia de un reto
+    public const STATUS_PENDING = 'pending';
+
+    public const STATUS_APPROVED = 'approved';
+
+    public const STATUS_REJECTED = 'rejected';
 
     /**
      * The attributes that should be cast.
@@ -39,6 +51,7 @@ class Observation extends Model
         'is_public'   => 'boolean',
         'latitude'    => 'float',
         'longitude'   => 'float',
+        'reviewed_at' => 'datetime',
     ];
 
     // ── Relaciones ───────────────────────────────────────────────────────
@@ -51,6 +64,16 @@ class Observation extends Model
     public function taxon(): BelongsTo
     {
         return $this->belongsTo(Taxa::class, 'taxon_id');
+    }
+
+    public function challenge(): BelongsTo
+    {
+        return $this->belongsTo(Challenge::class);
+    }
+
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
     }
 
     public function photos(): HasMany

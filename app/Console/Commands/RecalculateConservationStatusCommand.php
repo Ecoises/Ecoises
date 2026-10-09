@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Taxa;
-use App\Services\ConservationStatusResolver;
+use App\Services\Biodiversity\ConservationStatusResolver;
 use Illuminate\Console\Command;
 
 class RecalculateConservationStatusCommand extends Command

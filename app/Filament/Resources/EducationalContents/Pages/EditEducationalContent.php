@@ -4,8 +4,8 @@ namespace App\Filament\Resources\EducationalContents\Pages;
 
 use App\Filament\Resources\EducationalContents\EducationalContentResource;
 use App\Models\EducationalContent;
-use App\Services\EducationalContentPublicationService;
-use App\Services\EducationalDraftService;
+use App\Services\Editorial\EducationalContentPublicationService;
+use App\Services\Editorial\EducationalDraftService;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;

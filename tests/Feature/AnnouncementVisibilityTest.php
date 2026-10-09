@@ -3,7 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Announcement;
-use App\Services\AnnouncementPublicationService;
+use App\Services\Editorial\AnnouncementPublicationService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;

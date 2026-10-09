@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Services\ConservationStatusResolver;
+use App\Services\Biodiversity\ConservationStatusResolver;
 use PHPUnit\Framework\TestCase;
 
 class ConservationStatusResolverTest extends TestCase

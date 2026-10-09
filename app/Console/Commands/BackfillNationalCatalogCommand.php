@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\EnrichSpeciesJob;
 use App\Models\Taxa;
-use App\Services\Api\GbifService;
+use App\Services\ExternalApi\GbifService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 

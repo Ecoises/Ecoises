@@ -4,9 +4,9 @@ namespace App\Jobs;
 
 use App\Models\Taxa;
 use App\Models\TaxonApiReference;
-use App\Services\SpeciesMerger;
-use App\Services\Api\GbifService;
-use App\Services\Api\INaturalistService;
+use App\Services\Biodiversity\SpeciesMerger;
+use App\Services\ExternalApi\GbifService;
+use App\Services\ExternalApi\INaturalistService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;

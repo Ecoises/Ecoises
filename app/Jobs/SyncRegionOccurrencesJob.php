@@ -9,7 +9,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use App\Services\Api\GbifService;
+use App\Services\ExternalApi\GbifService;
 
 class SyncRegionOccurrencesJob implements ShouldQueue
 {

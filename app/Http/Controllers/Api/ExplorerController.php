@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\ExplorerService;
+use App\Services\Biodiversity\ExplorerService;
 use Illuminate\Http\Request;
 
 class ExplorerController extends Controller

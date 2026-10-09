@@ -5,7 +5,7 @@ namespace App\Jobs;
 use App\Models\ArticleDetails;
 use App\Models\Lesson;
 use App\Models\User;
-use App\Services\GeminiAudioService;
+use App\Services\Audio\GeminiAudioService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;

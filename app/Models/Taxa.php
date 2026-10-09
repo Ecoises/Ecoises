@@ -114,9 +114,8 @@ class Taxa extends Model
             'conservation_status_details' => $apiData['conservation_status'] ?? null, // ✅ AGREGADO: Detalles de conservación
         ]);
 
-        // Extraer status de establecimiento directamente de los datos de la API
-        $service = app(\App\Services\TaxonService::class);
-        $establishmentData = $service->extractEstablishmentStatusFromApiData($apiData);
+        // Estatus de establecimiento (nativa/endémica/introducida) según iNaturalist
+        $establishmentData = app(\App\Services\Biodiversity\EstablishmentStatusResolver::class)->resolve($apiData);
         $enriched['is_native'] = $establishmentData['is_native'];
         $enriched['is_endemic'] = $establishmentData['is_endemic'];
         $enriched['is_introduced'] = $establishmentData['is_introduced'];

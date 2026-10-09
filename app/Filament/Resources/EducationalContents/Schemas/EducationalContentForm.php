@@ -5,7 +5,7 @@ namespace App\Filament\Resources\EducationalContents\Schemas;
 use App\Models\EducationalContent;
 use App\Models\EducationalContentAsset;
 use App\Models\Lesson; // Ensure Lesson model exists and has estimateReadingTime if used
-use App\Services\ElevenLabsService;
+use App\Services\Audio\ElevenLabsService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Hidden;

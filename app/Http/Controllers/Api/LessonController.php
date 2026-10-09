@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\EducationalContent;
 use App\Models\Lesson;
-use App\Services\ContentProgressService;
+use App\Services\Learning\ContentProgressService;
 use Exception;
 use Illuminate\Http\Request;
 
