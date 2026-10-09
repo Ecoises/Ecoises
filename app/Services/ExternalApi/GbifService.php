@@ -14,6 +14,25 @@ class GbifService extends BaseApiService
     private const NEARBY_FACET_LIMIT = 2000;
 
     /**
+     * Claves del backbone de GBIF para los grupos del filtro del explorador.
+     * Se fijan a mano porque /species/match es ambiguo para algunos nombres
+     * ("Amphibia" tiene homónimos) y "Reptilia" no es un grupo aceptado en
+     * GBIF: los reptiles se reparten en Squamata, Testudines y Crocodylia.
+     */
+    private const GROUP_TAXON_KEYS = [
+        'Aves' => [212],
+        'Mammalia' => [359],
+        'Reptilia' => [11592253, 11418114, 11493978],
+        'Amphibia' => [131],
+        'Insecta' => [216],
+        'Arachnida' => [367],
+        'Mollusca' => [52],
+        'Actinopterygii' => [204],
+        'Plantae' => [6],
+        'Fungi' => [5],
+    ];
+
+    /**
      * @var string
      */
     protected $apiName = 'gbif';
@@ -557,43 +576,50 @@ class GbifService extends BaseApiService
             }
         }
 
-        if (!$requestedTaxon && !empty($filters['iconic_taxa'])) {
-            $taxonMatch = $this->searchTaxon((string) $filters['iconic_taxa']);
-            $match = $taxonMatch['data'][0] ?? null;
-            $requestedTaxon = $match['usageKey'] ?? $match['acceptedUsageKey'] ?? $match['key'] ?? null;
-        }
-
-        if ($requestedTaxon) {
-            $params['taxonKey'] = $requestedTaxon;
-        }
+        $taxonKeys = $requestedTaxon ? [$requestedTaxon] : $this->groupTaxonKeys($filters['iconic_taxa'] ?? null);
 
         if (!empty($filters['native'])) {
             $params['establishmentMeans'] = 'Native';
         }
 
-        Log::info('Consultando catálogo de especies de GBIF', array_merge($context, [
-            'facet_limit' => $facetLimit,
-            'has_query' => $query !== '',
-            'taxon_key' => $params['taxonKey'] ?? null,
-        ]));
+        // GBIF no admite varios taxonKey en la misma consulta de facetas desde
+        // este cliente, así que cada clave se consulta aparte y se suman.
+        $buckets = collect();
+        $occurrenceTotal = 0;
+        $cached = true;
 
-        $response = $this->makeRequest('get', '/occurrence/search', $params, true);
-        if (!$response['success']) {
-            return $response;
+        foreach ($taxonKeys ?: [null] as $taxonKey) {
+            $response = $this->makeRequest('get', '/occurrence/search', array_filter(
+                array_merge($params, ['taxonKey' => $taxonKey]),
+                fn ($value) => $value !== null
+            ), true);
+
+            if (!$response['success']) {
+                return $response;
+            }
+
+            $facet = collect($response['data']['facets'] ?? [])
+                ->first(function (array $item): bool {
+                    $field = strtoupper(str_replace('-', '_', (string) ($item['field'] ?? '')));
+                    return in_array($field, ['SPECIES_KEY', 'SPECIESKEY'], true);
+                });
+
+            $buckets = $buckets->concat(
+                collect($facet['counts'] ?? [])
+                    ->filter(fn (array $bucket) => isset($bucket['name']))
+                    ->map(fn (array $bucket) => [
+                        'species_key' => (string) $bucket['name'],
+                        'occurrence_count' => (int) ($bucket['count'] ?? 0),
+                    ])
+            );
+            $occurrenceTotal += (int) ($response['data']['count'] ?? 0);
+            $cached = $cached && ($response['cached'] ?? false);
         }
 
-        $facet = collect($response['data']['facets'] ?? [])
-            ->first(function (array $item): bool {
-                $field = strtoupper(str_replace('-', '_', (string) ($item['field'] ?? '')));
-                return in_array($field, ['SPECIES_KEY', 'SPECIESKEY'], true);
-            });
-
-        $buckets = collect($facet['counts'] ?? [])
-            ->filter(fn (array $bucket) => isset($bucket['name']))
-            ->map(fn (array $bucket) => [
-                'species_key' => (string) $bucket['name'],
-                'occurrence_count' => (int) ($bucket['count'] ?? 0),
-            ])
+        $buckets = $buckets
+            ->sortByDesc('occurrence_count')
+            ->unique('species_key')
+            ->take($facetLimit)
             ->values()
             ->all();
 
@@ -601,13 +627,34 @@ class GbifService extends BaseApiService
             'success' => true,
             'data' => [
                 'buckets' => $buckets,
-                'occurrence_total' => (int) ($response['data']['count'] ?? 0),
+                'occurrence_total' => $occurrenceTotal,
                 'truncated' => count($buckets) >= $facetLimit,
                 'facet_limit' => $facetLimit,
             ],
-            'cached' => $response['cached'] ?? false,
+            'cached' => $cached,
             'api' => $this->apiName,
         ];
+    }
+
+    /**
+     * Claves de GBIF para un grupo del filtro (Aves, Reptilia…).
+     *
+     * @return array<int, int|string>
+     */
+    private function groupTaxonKeys(?string $group): array
+    {
+        if (!$group) {
+            return [];
+        }
+
+        if (isset(self::GROUP_TAXON_KEYS[$group])) {
+            return self::GROUP_TAXON_KEYS[$group];
+        }
+
+        $match = $this->searchTaxon($group)['data'][0] ?? null;
+        $key = $match['usageKey'] ?? $match['acceptedUsageKey'] ?? null;
+
+        return $key ? [$key] : [];
     }
     /**
      * Obtiene info de ubicación

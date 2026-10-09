@@ -44,7 +44,7 @@ class ExplorerService
         $gbifFilters = $this->buildGbifFilters($filters);
         $cacheFilters = $gbifFilters;
         ksort($cacheFilters);
-        $cacheKey = 'explorer:country:v1:CO:' . sha1(json_encode($cacheFilters));
+        $cacheKey = 'explorer:country:v2:CO:' . sha1(json_encode($cacheFilters));
         $catalogResult = Cache::remember(
             $cacheKey,
             self::CACHE_TTL_SECONDS,
@@ -294,7 +294,7 @@ class ExplorerService
         $cellLat = number_format(round($lat, 3), 3, '.', '');
         $cellLng = number_format(round($lng, 3), 3, '.', '');
 
-        return 'explorer:species-facet:v4:' . sha1(json_encode([
+        return 'explorer:species-facet:v5:' . sha1(json_encode([
             'lat' => $cellLat,
             'lng' => $cellLng,
             'radius' => $radius,
