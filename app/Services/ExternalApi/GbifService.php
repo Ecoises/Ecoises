@@ -5,6 +5,7 @@ namespace App\Services\ExternalApi;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use App\Models\UnifiedApiCache;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -12,6 +13,9 @@ use Illuminate\Support\Facades\Log;
 class GbifService extends BaseApiService
 {
     private const NEARBY_FACET_LIMIT = 2000;
+
+    /** Tope para quien pida explícitamente más especies (p. ej. para excluir las de iNaturalist). */
+    private const MAX_FACET_LIMIT = 10000;
 
     /**
      * Claves del backbone de GBIF para los grupos del filtro del explorador.
@@ -27,9 +31,24 @@ class GbifService extends BaseApiService
         'Insecta' => [216],
         'Arachnida' => [367],
         'Mollusca' => [52],
-        'Actinopterygii' => [204],
         'Plantae' => [6],
         'Fungi' => [5],
+        // Animales, plantas y hongos juntos (deja fuera bacterias, virus y protistas).
+        'Biota' => [1, 6, 5],
+    ];
+
+    /**
+     * En el backbone actual de GBIF los peces óseos no tienen clase asignada,
+     * así que el grupo "Peces" se arma con sus órdenes más comunes en Colombia.
+     */
+    private const GROUP_TAXON_ORDERS = [
+        'Actinopterygii' => [
+            'Characiformes', 'Siluriformes', 'Perciformes', 'Cichliformes', 'Gymnotiformes',
+            'Cyprinodontiformes', 'Clupeiformes', 'Pleuronectiformes', 'Tetraodontiformes',
+            'Beloniformes', 'Synbranchiformes', 'Scorpaeniformes', 'Blenniiformes', 'Gobiiformes',
+            'Carangiformes', 'Anguilliformes', 'Mugiliformes', 'Atheriniformes',
+            'Osteoglossiformes', 'Syngnathiformes', 'Acanthuriformes', 'Lutjaniformes',
+        ],
     ];
 
     /**
@@ -536,7 +555,7 @@ class GbifService extends BaseApiService
     private function searchSpeciesCatalog(array $scopeParams, array $filters, array $context): array
     {
         $facetLimit = min(
-            self::NEARBY_FACET_LIMIT,
+            self::MAX_FACET_LIMIT,
             max(100, (int) ($filters['catalog_limit'] ?? self::NEARBY_FACET_LIMIT))
         );
 
@@ -582,18 +601,18 @@ class GbifService extends BaseApiService
             $params['establishmentMeans'] = 'Native';
         }
 
+        // Permite restringir a un dataset (p. ej. iNaturalist en GBIF) para comparar fuentes.
+        if (!empty($filters['dataset_key'])) {
+            $params['datasetKey'] = $filters['dataset_key'];
+        }
+
         // GBIF no admite varios taxonKey en la misma consulta de facetas desde
-        // este cliente, así que cada clave se consulta aparte y se suman.
+        // este cliente: cada clave se consulta aparte (en paralelo) y se suman.
         $buckets = collect();
         $occurrenceTotal = 0;
-        $cached = true;
+        $cached = false;
 
-        foreach ($taxonKeys ?: [null] as $taxonKey) {
-            $response = $this->makeRequest('get', '/occurrence/search', array_filter(
-                array_merge($params, ['taxonKey' => $taxonKey]),
-                fn ($value) => $value !== null
-            ), true);
-
+        foreach ($this->facetResponses($params, $taxonKeys ?: [null]) as $response) {
             if (!$response['success']) {
                 return $response;
             }
@@ -613,7 +632,6 @@ class GbifService extends BaseApiService
                     ])
             );
             $occurrenceTotal += (int) ($response['data']['count'] ?? 0);
-            $cached = $cached && ($response['cached'] ?? false);
         }
 
         $buckets = $buckets
@@ -637,6 +655,36 @@ class GbifService extends BaseApiService
     }
 
     /**
+     * Una consulta de facetas por clave taxonómica. Con una sola clave usa la
+     * caché normal; con varias las lanza en paralelo.
+     *
+     * @return array<int, array{success: bool, data?: array}>
+     */
+    private function facetResponses(array $params, array $taxonKeys): array
+    {
+        if (count($taxonKeys) === 1) {
+            return [$this->makeRequest('get', '/occurrence/search', array_filter(
+                array_merge($params, ['taxonKey' => $taxonKeys[0]]),
+                fn ($value) => $value !== null
+            ), true)];
+        }
+
+        $url = rtrim($this->config['base_url'], '/').'/occurrence/search';
+        $timeout = $this->config['timeout'] ?? 30;
+        $responses = Http::pool(fn (Pool $pool) => array_map(
+            fn ($key) => $pool->as((string) $key)->timeout($timeout)->get($url, array_merge($params, ['taxonKey' => $key])),
+            $taxonKeys
+        ));
+
+        return array_values(array_map(
+            fn ($response) => $response instanceof Response && $response->successful()
+                ? ['success' => true, 'data' => $response->json()]
+                : ['success' => true, 'data' => ['facets' => [], 'count' => 0]],
+            $responses
+        ));
+    }
+
+    /**
      * Claves de GBIF para un grupo del filtro (Aves, Reptilia…).
      *
      * @return array<int, int|string>
@@ -649,6 +697,15 @@ class GbifService extends BaseApiService
 
         if (isset(self::GROUP_TAXON_KEYS[$group])) {
             return self::GROUP_TAXON_KEYS[$group];
+        }
+
+        if (isset(self::GROUP_TAXON_ORDERS[$group])) {
+            return Cache::rememberForever("gbif:group-orders:{$group}", fn () => collect(self::GROUP_TAXON_ORDERS[$group])
+                ->map(fn (string $order) => $this->searchTaxon($order)['data'][0] ?? null)
+                ->filter(fn ($match) => ($match['matchType'] ?? 'NONE') === 'EXACT' && !empty($match['usageKey']))
+                ->pluck('usageKey')
+                ->values()
+                ->all());
         }
 
         $match = $this->searchTaxon($group)['data'][0] ?? null;

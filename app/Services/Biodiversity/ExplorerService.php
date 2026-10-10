@@ -6,393 +6,422 @@ use App\Jobs\EnrichSpeciesJob;
 use App\Models\Taxa;
 use App\Services\ExternalApi\GbifService;
 use App\Services\ExternalApi\INaturalistService;
-use App\Services\Biodiversity\SpeciesMerger;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 
+/**
+ * Explorador de especies de Colombia.
+ *
+ * Combina dos fuentes con papeles distintos:
+ *
+ *  1. citizenScience()    → iNaturalist (/observations/species_counts). Una sola
+ *     llamada trae especies con foto y nombre común en español, ya filtradas por
+ *     zona, grupo, nativas, endémicas y amenazadas. Es la lista que se ve primero.
+ *
+ *  2. scientificRecords() → GBIF. Especies con registros científicos en la zona
+ *     (colecciones, museos, monitoreos) que iNaturalist no tiene. Se calcula una
+ *     vez por zona y filtro, se guarda en caché una semana y se pide aparte, así
+ *     nunca retrasa la lista principal.
+ *
+ * Las especies que aparecen se guardan en `taxa` para que su ficha abra al instante.
+ */
 class ExplorerService
 {
-    private const CACHE_TTL_SECONDS = 1800;
+    public const GROUPS = ['Aves', 'Mammalia', 'Reptilia', 'Amphibia', 'Actinopterygii', 'Insecta', 'Arachnida', 'Mollusca', 'Plantae', 'Fungi'];
+
+    private const LIST_TTL = 86400;            // 24 h
+
+    private const SCIENTIFIC_TTL = 604800;     // 7 días
+
+    private const SCIENTIFIC_CANDIDATES = 2000; // especies de GBIF consideradas por zona
+
+    /** Dataset "iNaturalist Research-grade Observations" dentro de GBIF. */
+    private const INAT_DATASET_KEY = '50c9509d-22c7-4a22-a47d-8c48425ef4a7';
+
     private const THREATENED_STATUSES = ['VU', 'EN', 'CR'];
-    // Cuántas tarjetas sin foto se completan antes de responder en la primera
-    // visita a una zona. El resto llega por la cola species-sync.
-    private const SYNCHRONOUS_ENRICHMENT_LIMIT = 4;
 
     public function __construct(
         protected GbifService $gbif,
         protected INaturalistService $inat,
-        protected SpeciesMerger $merger,
     ) {}
 
-    public function explore(float $lat, float $lng, array $filters = []): array
+    /**
+     * Lista principal (iNaturalist), paginada.
+     *
+     * @param  array{lat?: ?float, lng?: ?float, radius?: int, group?: ?string, q?: ?string, native?: bool, endemic?: bool, threatened?: bool, order?: string, seed?: ?string, page?: int, per_page?: int}  $filters
+     */
+    public function citizenScience(array $filters): array
     {
-        $radius = (int) ($filters['radius'] ?? 50);
-        $gbifFilters = $this->buildGbifFilters($filters);
-
-        $cacheKey = $this->catalogCacheKey($lat, $lng, $radius, $gbifFilters);
-        $catalogResult = Cache::remember(
-            $cacheKey,
-            self::CACHE_TTL_SECONDS,
-            fn () => $this->gbif->searchSpeciesByRegion($lat, $lng, $radius, $gbifFilters)
-        );
-
-        return $this->formatCatalogResult($catalogResult, $filters, $radius, $lat, $lng);
-    }
-
-    public function exploreNational(array $filters = []): array
-    {
-        $gbifFilters = $this->buildGbifFilters($filters);
-        $cacheFilters = $gbifFilters;
-        ksort($cacheFilters);
-        $cacheKey = 'explorer:country:v2:CO:' . sha1(json_encode($cacheFilters));
-        $catalogResult = Cache::remember(
-            $cacheKey,
-            self::CACHE_TTL_SECONDS,
-            fn () => $this->gbif->searchSpeciesByCountry('CO', $gbifFilters)
-        );
-
-        return $this->formatCatalogResult($catalogResult, $filters, null, null, null);
-    }
-
-    private function buildGbifFilters(array $filters): array
-    {
-        $query = trim((string) ($filters['q'] ?? ''));
-        $localTaxonKey = null;
-
-        if ($query !== '') {
-            $localTaxonKey = Taxa::query()
-                ->whereNotNull('gbif_taxon_key')
-                ->where(function ($builder) use ($query) {
-                    $builder->where('scientific_name', $query)
-                        ->orWhere('common_name', $query);
-                })
-                ->value('gbif_taxon_key');
-        }
-
-        return array_filter([
-            'q' => $query !== '' ? $query : null,
-            'taxon_key' => $localTaxonKey,
-            'iconic_taxa' => $filters['iconic_taxa'] ?? null,
-            'native' => !empty($filters['native']),
-            'catalog_limit' => 2000,
-        ], fn ($value) => $value !== null && $value !== '' && $value !== false);
-    }
-
-    private function formatCatalogResult(
-        array $catalogResult,
-        array $filters,
-        ?int $radius,
-        ?float $latitude = null,
-        ?float $longitude = null,
-    ): array
-    {
-        if (!($catalogResult['success'] ?? false)) {
-            return [
-                'success' => false,
-                'error' => $catalogResult['error'] ?? 'Error al consultar GBIF',
-            ];
-        }
-
+        $perPage = (int) ($filters['per_page'] ?? 24);
         $page = max(1, (int) ($filters['page'] ?? 1));
-        $perPage = min(50, max(10, (int) ($filters['per_page'] ?? 25)));
-        $catalogData = $catalogResult['data'] ?? [];
-        $buckets = collect($catalogData['buckets'] ?? []);
-        $usesEnrichmentFilter = !empty($filters['endemic']) || !empty($filters['threatened']);
+        $params = $this->inatParams($filters);
 
-        if ($usesEnrichmentFilter && $buckets->isNotEmpty()) {
-            $buckets = $this->applyEnrichmentFilters($buckets, $filters);
+        if ($params === null) {
+            return $this->emptyPage($perPage);
         }
 
-        if (($filters['order_by'] ?? null) === 'random') {
-            $seed = (string) ($filters['random_seed'] ?? now()->format('Y-m-d-H'));
-            $buckets = $buckets
-                ->sortBy(fn (array $bucket) => sha1($seed . ':' . $bucket['species_key']))
-                ->values();
+        $isRandom = ($filters['order'] ?? 'popular') === 'random';
+        $requestedPage = $isRandom ? $this->randomPage($params, $perPage, $page, (string) ($filters['seed'] ?? 'ecoises')) : $page;
+
+        $response = $this->speciesCounts($params, $requestedPage, $perPage);
+        if (! ($response['success'] ?? false)) {
+            return ['success' => false, 'error' => $response['error'] ?? 'iNaturalist no respondió'];
         }
 
-        $total = $buckets->count();
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $page = min($page, $lastPage);
-        $pageBuckets = $buckets->slice(($page - 1) * $perPage, $perPage)->values();
-        $pageKeys = $pageBuckets->pluck('species_key')->map(fn ($key) => (string) $key)->all();
-        $detailsByKey = $this->gbif->getSpeciesDetailsBatch($pageKeys);
-        $colombianNamesByKey = $this->gbif->getColombianVernacularNamesBatch($pageKeys);
-
-        [$keyToId, $toEnrich] = $this->persistPageTaxa($pageBuckets, $detailsByKey, $colombianNamesByKey);
-        $taxaById = Taxa::with('apiReferences')
-            ->whereIn('id', array_values($keyToId))
-            ->get()
-            ->keyBy('id');
-
-        // GBIF entrega primero la cobertura geográfica, pero los datos de iNaturalist
-        // pueden llegar después por cola. Enriquecemos una parte de la página visible
-        // antes de responder para que las tarjetas no aparezcan vacías en el primer load.
-        $syncNames = $taxaById
-            ->filter(function (Taxa $taxon) {
-                $inatRef = $taxon->apiReferences->firstWhere('api_source', 'inaturalist');
-                $data = $inatRef?->data ?? [];
-
-                return !$inatRef
-                    || empty($data['default_photo']) && empty($data['wikipedia_summary']);
-            })
-            ->pluck('scientific_name')
-            ->filter()
-            ->unique()
-            ->take(self::SYNCHRONOUS_ENRICHMENT_LIMIT)
-            ->values();
-
-        foreach ($syncNames as $scientificName) {
-            try {
-                app(EnrichSpeciesJob::class, ['canonicalName' => $scientificName])
-                    ->handle($this->gbif, $this->inat, $this->merger);
-            } catch (\Throwable $exception) {
-                report($exception);
-            }
+        $species = collect($response['data']);
+        if ($isRandom) {
+            $species = $this->seededShuffle($species, ($filters['seed'] ?? 'ecoises').":{$page}");
         }
 
-        if ($syncNames->isNotEmpty()) {
-            $taxaById = Taxa::with('apiReferences')
-                ->whereIn('id', array_values($keyToId))
-                ->get()
-                ->keyBy('id');
-        }
-
-        $results = [];
-        foreach ($pageBuckets as $bucket) {
-            $speciesKey = (string) $bucket['species_key'];
-            $taxonId = $keyToId[$speciesKey] ?? null;
-            $taxon = $taxonId ? $taxaById->get($taxonId) : null;
-            if (!$taxon) {
-                continue;
-            }
-
-            $item = $taxon->enriched_data;
-            $gbifDetails = $detailsByKey[$speciesKey] ?? [];
-            $displayName = $gbifDetails['canonicalName']
-                ?? $gbifDetails['species']
-                ?? $gbifDetails['scientificName']
-                ?? $item['scientific_name'];
-            $item['scientific_name'] = SpeciesMerger::stripAuthorship($displayName);
-            $item['occurrence_count'] = (int) ($bucket['occurrence_count'] ?? 0);
-            if ($radius !== null) {
-                $item['nearby_radius_km'] = $radius;
-            }
-            $results[] = $item;
-        }
-
-        $inatOnly = $radius !== null && $page === 1
-            ? $this->findINaturalistOnlySpecies(
-                $detailsByKey,
-                $latitude,
-                $longitude,
-                $radius,
-            )
-            : [];
-
-        // Especies que iNaturalist reporta cerca pero GBIF no: la tarjeta se arma
-        // con los datos que ya trajo la consulta de iNaturalist y la ficha
-        // completa se descarga en segundo plano (cola species-sync).
-        if ($inatOnly) {
-            $existing = Taxa::with('apiReferences')
-                ->whereIn('scientific_name', collect($inatOnly)->pluck('name')->all())
-                ->get()
-                ->keyBy('scientific_name');
-
-            foreach ($inatOnly as $inatSpecies) {
-                $taxon = $existing->get($inatSpecies['name']) ?? Taxa::firstOrCreate(
-                    ['scientific_name' => $inatSpecies['name']],
-                    [
-                        'common_name' => $inatSpecies['common_name'],
-                        'inat_taxon_id' => $inatSpecies['id'],
-                        'sync_status' => 'pending',
-                    ]
-                );
-
-                if ($taxon->sync_status !== 'synced') {
-                    $toEnrich[] = $taxon->scientific_name;
-                }
-
-                $item = $taxon->enriched_data;
-                $item['default_photo'] ??= $inatSpecies['default_photo'];
-                $item['scientific_name'] = $taxon->scientific_name;
-                $item['observation_count'] = (int) ($inatSpecies['observation_count'] ?? 0);
-                $item['source'] = 'inaturalist';
-                $results[] = $item;
-            }
-        }
-
-        foreach (array_unique($toEnrich) as $name) {
-            EnrichSpeciesJob::dispatch($name)->onQueue('species-sync');
-        }
-
-        $from = $total === 0 ? 0 : (($page - 1) * $perPage) + 1;
-        $to = $total === 0 ? 0 : min($page * $perPage, $total);
+        $idsByName = $this->persistINaturalistTaxa($species);
+        $total = (int) ($response['pagination']['total'] ?? $species->count());
 
         return [
             'success' => true,
-            'data' => $results,
+            'data' => $species
+                ->map(fn (array $taxon) => $this->inatCard($taxon, $idsByName, $filters))
+                ->filter(fn ($card) => $card['id'])
+                ->values()
+                ->all(),
             'meta' => [
-                'source' => 'gbif',
-                'secondary_source' => $inatOnly ? 'inaturalist' : null,
-                'inat_only_count' => count($inatOnly),
-                'scope' => $radius === null ? 'national' : 'nearby',
-                'cached' => (bool) ($catalogResult['cached'] ?? false),
-                'radius_km' => $radius,
-                'occurrence_total' => (int) ($catalogData['occurrence_total'] ?? 0),
-                'catalog_truncated' => (bool) ($catalogData['truncated'] ?? false),
-                'enriching_count' => count(array_unique($toEnrich)),
-                'enrichment_filter_applied' => $usesEnrichmentFilter,
-                'pagination' => [
-                    'total' => $total,
-                    'per_page' => $perPage,
-                    'current_page' => $page,
-                    'last_page' => $lastPage,
-                    'from' => $from,
-                    'to' => $to,
-                ],
+                'source' => 'inaturalist',
+                'scope' => isset($params['lat']) ? 'nearby' : 'national',
+                'pagination' => $this->pagination($total, $perPage, $page),
             ],
         ];
     }
 
-    private function findINaturalistOnlySpecies(array $gbifDetails, ?float $latitude, ?float $longitude, int $radius): array
+    /**
+     * Registros científicos de GBIF que no aparecen en iNaturalist para la misma
+     * zona y filtros. Si es la primera vez que alguien pide esa combinación, se
+     * calcula en esta petición (unos segundos) y queda en caché una semana.
+     */
+    public function scientificRecords(array $filters): array
     {
-        if ($latitude === null || $longitude === null) {
-            return [];
+        $perPage = (int) ($filters['per_page'] ?? 24);
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $key = 'explorer:scientific:v4:'.sha1(json_encode($this->scopeSignature($filters)));
+
+        $entries = Cache::get($key);
+        if ($entries === null) {
+            $lock = Cache::lock($key.':lock', 180);
+            if (! $lock->get()) {
+                return ['success' => true, 'status' => 'building', 'data' => [], 'meta' => ['pagination' => $this->pagination(0, $perPage, 1)]];
+            }
+
+            try {
+                $entries = $this->buildScientificRecords($filters);
+                Cache::put($key, $entries, self::SCIENTIFIC_TTL);
+            } finally {
+                $lock->release();
+            }
         }
 
-        $gbifNames = collect($gbifDetails)
-            ->map(fn (array $details) => SpeciesMerger::stripAuthorship(
-                $details['canonicalName'] ?? $details['species'] ?? $details['scientificName'] ?? ''
-            ))
+        $total = count($entries);
+        $slice = collect(array_slice($entries, ($page - 1) * $perPage, $perPage));
+        $details = $this->gbif->getSpeciesDetailsBatch($slice->pluck('species_key')->all());
+        $taxaByKey = $this->persistGbifTaxa($slice, $details);
+        $taxa = Taxa::with('apiReferences')->whereIn('id', $taxaByKey->pluck('id'))->get()->keyBy('id');
+
+        $cards = $slice
+            ->map(function (array $entry) use ($taxa, $taxaByKey) {
+                $taxon = $taxa->get($taxaByKey->get((string) $entry['species_key'])?->id);
+
+                return $taxon ? $this->localCard($taxon, 'gbif', ['occurrence_count' => $entry['occurrence_count']]) : null;
+            })
             ->filter()
-            ->mapWithKeys(fn (string $name) => [mb_strtolower($name) => true]);
-        $details = $this->inat->getNearbySpecies($latitude, $longitude, $radius, 100);
-
-        if (!($details['success'] ?? false)) {
-            return [];
-        }
-
-        return collect($details['data'] ?? [])
-            ->filter(fn (array $taxon) => !empty($taxon['name']))
-            ->reject(fn (array $taxon) => $gbifNames->has(
-                mb_strtolower(SpeciesMerger::stripAuthorship($taxon['name']))
-            ))
-            ->map(fn (array $taxon) => [
-                'id' => $taxon['id'],
-                'name' => SpeciesMerger::stripAuthorship($taxon['name']),
-                'common_name' => $taxon['common_name'] ?? null,
-                'default_photo' => $taxon['default_photo'] ?? null,
-            ])
-            ->unique('name')
-            ->take(8)
-            ->values()
-            ->all();
-    }
-    private function catalogCacheKey(float $lat, float $lng, int $radius, array $filters): string
-    {
-        ksort($filters);
-        $cellLat = number_format(round($lat, 3), 3, '.', '');
-        $cellLng = number_format(round($lng, 3), 3, '.', '');
-
-        return 'explorer:species-facet:v5:' . sha1(json_encode([
-            'lat' => $cellLat,
-            'lng' => $cellLng,
-            'radius' => $radius,
-            'filters' => $filters,
-        ]));
-    }
-
-    private function applyEnrichmentFilters(Collection $buckets, array $filters): Collection
-    {
-        $keys = $buckets->pluck('species_key')->map(fn ($key) => (string) $key)->all();
-        $query = Taxa::query()->whereIn('gbif_taxon_key', $keys);
-
-        if (!empty($filters['endemic'])) {
-            $query->where('is_endemic', true);
-        }
-
-        if (!empty($filters['threatened'])) {
-            $query->whereIn('conservation_status', self::THREATENED_STATUSES);
-        }
-
-        $eligible = $query->pluck('gbif_taxon_key')->map(fn ($key) => (string) $key)->flip();
-
-        return $buckets
-            ->filter(fn (array $bucket) => $eligible->has((string) $bucket['species_key']))
             ->values();
+
+        // Las fotos que aún faltan se buscan en segundo plano.
+        $cards->whereNull('default_photo')->each(fn (array $card) => EnrichSpeciesJob::dispatch($card['scientific_name']));
+
+        return [
+            'success' => true,
+            'status' => 'ready',
+            'data' => $cards->all(),
+            'meta' => ['source' => 'gbif', 'pagination' => $this->pagination($total, $perPage, $page)],
+        ];
     }
 
     /**
-     * @return array{0: array<string, int>, 1: array<int, string>}
+     * Especies con registros en GBIF para la zona menos las que GBIF recibe de
+     * iNaturalist: dos consultas de facetas, sin comparar nombres uno a uno.
+     *
+     * @return array<int, array{species_key: string, occurrence_count: int}>
      */
-    private function persistPageTaxa(
-        Collection $pageBuckets,
-        array $detailsByKey,
-        array $colombianNamesByKey = []
-    ): array
+    private function buildScientificRecords(array $filters): array
     {
-        $keyToId = [];
-        $toEnrich = [];
-        $pageKeys = $pageBuckets
-            ->pluck('species_key')
-            ->map(fn ($key) => (string) $key)
-            ->all();
-        $existingByKey = Taxa::query()
-            ->whereIn('gbif_taxon_key', $pageKeys)
-            ->get()
-            ->keyBy(fn (Taxa $taxon) => (string) $taxon->gbif_taxon_key);
+        $gbifFilters = array_filter([
+            'iconic_taxa' => $filters['group'] ?? (empty($filters['q']) ? 'Biota' : null),
+            'catalog_limit' => self::SCIENTIFIC_CANDIDATES,
+            'q' => $filters['q'] ?? null,
+        ]);
 
-        foreach ($pageBuckets as $bucket) {
-            $speciesKey = (string) $bucket['species_key'];
-            $details = $detailsByKey[$speciesKey] ?? null;
-            if (!$details) {
-                continue;
+        $all = $this->gbifCatalog($filters, $gbifFilters);
+        $citizen = $this->gbifCatalog($filters, ['dataset_key' => self::INAT_DATASET_KEY, 'catalog_limit' => 10000] + $gbifFilters);
+        $citizenKeys = collect($citizen['data']['buckets'] ?? [])->pluck('species_key')->map(fn ($key) => (string) $key)->flip();
+
+        $entries = collect($all['data']['buckets'] ?? [])
+            ->reject(fn (array $bucket) => $citizenKeys->has((string) $bucket['species_key']))
+            ->map(fn (array $bucket) => ['species_key' => (string) $bucket['species_key'], 'occurrence_count' => (int) $bucket['occurrence_count']])
+            ->values();
+
+        // Nativas, endémicas y amenazadas: GBIF casi nunca trae ese dato, así que
+        // se usan las banderas del catálogo local para las especies que ya conocemos.
+        if (! empty($filters['native']) || ! empty($filters['endemic']) || ! empty($filters['threatened'])) {
+            $known = Taxa::whereIn('gbif_taxon_key', $entries->pluck('species_key'))->get()
+                ->filter(fn (Taxa $taxon) => $this->passesLocalFlags($taxon, $filters))
+                ->pluck('gbif_taxon_key')->map(fn ($key) => (string) $key)->flip();
+            $entries = $entries->filter(fn (array $entry) => $known->has($entry['species_key']))->values();
+        }
+
+        return $entries->all();
+    }
+
+    private function gbifCatalog(array $filters, array $gbifFilters): array
+    {
+        return isset($filters['lat'], $filters['lng'])
+            ? $this->gbif->searchSpeciesByRegion((float) $filters['lat'], (float) $filters['lng'], (int) ($filters['radius'] ?? 25), $gbifFilters)
+            : $this->gbif->searchSpeciesByCountry('CO', $gbifFilters);
+    }
+
+    /**
+     * Nativas, endémicas y amenazadas no se pueden filtrar bien en GBIF: se usan las banderas
+     * del catálogo local, que vienen de iNaturalist con su fuente.
+     */
+    private function passesLocalFlags(Taxa $taxon, array $filters): bool
+    {
+        if (! empty($filters['native']) && ! $taxon->is_native) {
+            return false;
+        }
+
+        if (! empty($filters['endemic']) && ! $taxon->is_endemic) {
+            return false;
+        }
+
+        return empty($filters['threatened']) || in_array($taxon->conservation_status, self::THREATENED_STATUSES, true);
+    }
+
+    /** Parámetros de species_counts. Devuelve null si la búsqueda no encontró ningún taxón. */
+    private function inatParams(array $filters): ?array
+    {
+        $params = [];
+
+        if (isset($filters['lat'], $filters['lng'])) {
+            $params += ['lat' => round((float) $filters['lat'], 3), 'lng' => round((float) $filters['lng'], 3), 'radius' => (int) ($filters['radius'] ?? 25), 'place_id' => null];
+        }
+
+        $query = trim((string) ($filters['q'] ?? ''));
+        if ($query !== '') {
+            $taxonId = Cache::remember('explorer:inat-taxon:'.mb_strtolower($query), self::SCIENTIFIC_TTL, fn () => $this->inat->autocompleteTaxonId($query) ?? 0);
+            if (! $taxonId) {
+                return null;
             }
+            $params['taxon_id'] = $taxonId;
+        } elseif (! empty($filters['group'])) {
+            $params['iconic_taxa'] = $filters['group'];
+        }
 
-            $rawName = $details['canonicalName'] ?? $details['species'] ?? $details['scientificName'] ?? null;
-            $scientificName = $rawName ? SpeciesMerger::stripAuthorship($rawName) : null;
-            if (!$scientificName) {
-                continue;
-            }
-
-            $taxon = $existingByKey->get($speciesKey)
-                ?? Taxa::firstOrCreate(
-                    ['scientific_name' => $scientificName],
-                    ['sync_status' => 'pending']
-                );
-
-            $updates = ['gbif_taxon_key' => $speciesKey];
-            if (!empty($colombianNamesByKey[$speciesKey])) {
-                $updates['common_name'] = $colombianNamesByKey[$speciesKey];
-            }
-            foreach ([
-                'kingdom' => 'kingdom',
-                'phylum' => 'phylum',
-                'class' => 'class',
-                'order' => 'order_name',
-                'family' => 'family',
-                'genus' => 'genus',
-                'species' => 'species',
-            ] as $gbifField => $databaseField) {
-                if (empty($taxon->{$databaseField}) && !empty($details[$gbifField])) {
-                    $updates[$databaseField] = $details[$gbifField];
-                }
-            }
-
-            $taxon->fill($updates);
-            if ($taxon->isDirty()) {
-                $taxon->timestamps = false;
-                $taxon->save();
-                $taxon->timestamps = true;
-            }
-            $existingByKey->put($speciesKey, $taxon);
-            $keyToId[$speciesKey] = $taxon->id;
-
-            if (in_array($taxon->sync_status, ['pending', 'failed'], true)) {
-                $toEnrich[] = $scientificName;
+        foreach (['native', 'endemic', 'threatened'] as $flag) {
+            if (! empty($filters[$flag])) {
+                $params[$flag] = 'true';
             }
         }
 
-        return [$keyToId, $toEnrich];
+        return $params;
+    }
+
+    private function speciesCounts(array $params, int $page, int $perPage): array
+    {
+        $key = 'explorer:inat:v1:'.sha1(json_encode([$params, $page, $perPage]));
+
+        $cached = Cache::get($key);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $response = $this->inat->getSpeciesCounts($params + ['page' => $page, 'per_page' => $perPage]);
+        if ($response['success'] ?? false) {
+            Cache::put($key, $response, self::LIST_TTL);
+        }
+
+        return $response;
+    }
+
+    /**
+     * Orden aleatorio estable: con la misma semilla, la página 2 siempre es la misma.
+     * Se baraja el orden de las páginas de iNaturalist y luego cada página.
+     */
+    private function randomPage(array $params, int $perPage, int $page, string $seed): int
+    {
+        $first = $this->speciesCounts($params, 1, $perPage);
+        $lastPage = max(1, (int) ceil(((int) ($first['pagination']['total'] ?? 0)) / $perPage));
+        // iNaturalist no deja paginar más allá de 10.000 resultados.
+        $lastPage = min($lastPage, (int) floor(10000 / $perPage));
+
+        $pages = range(1, $lastPage);
+        mt_srand(crc32($seed));
+        shuffle($pages);
+        mt_srand();
+
+        return $pages[($page - 1) % $lastPage];
+    }
+
+    private function seededShuffle(Collection $items, string $seed): Collection
+    {
+        return $items->sortBy(fn (array $item) => sha1($seed.':'.($item['id'] ?? '')))->values();
+    }
+
+    /**
+     * Crea en `taxa` las especies de iNaturalist que aún no existen (una sola
+     * inserción) y devuelve sus IDs locales por nombre científico.
+     *
+     * @return array<string, int>
+     */
+    private function persistINaturalistTaxa(Collection $species): array
+    {
+        $names = $species->pluck('scientific_name')->filter()->unique()->values();
+        $existing = Taxa::whereIn('scientific_name', $names)->pluck('id', 'scientific_name');
+
+        $now = now();
+        $missing = $species
+            ->reject(fn (array $taxon) => empty($taxon['scientific_name']) || $existing->has($taxon['scientific_name']))
+            ->unique('scientific_name')
+            ->map(fn (array $taxon) => [
+                'scientific_name' => $taxon['scientific_name'],
+                'common_name' => $taxon['common_name'],
+                'inat_taxon_id' => $taxon['id'],
+                'is_native' => $taxon['native'] || $taxon['endemic'],
+                'is_endemic' => $taxon['endemic'],
+                'is_introduced' => $taxon['introduced'],
+                'sync_status' => 'pending',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+
+        if ($missing->isNotEmpty()) {
+            Taxa::insertOrIgnore($missing->values()->all());
+            $existing = Taxa::whereIn('scientific_name', $names)->pluck('id', 'scientific_name');
+        }
+
+        return $existing->all();
+    }
+
+    /**
+     * Crea o completa en `taxa` las especies de GBIF (taxonomía y nombre común).
+     *
+     * @return Collection<string, Taxa> indexado por species_key de GBIF
+     */
+    private function persistGbifTaxa(Collection $buckets, array $details): Collection
+    {
+        $keys = $buckets->pluck('species_key')->map(fn ($key) => (string) $key)->all();
+        $byKey = Taxa::whereIn('gbif_taxon_key', $keys)->get()->keyBy(fn (Taxa $taxon) => (string) $taxon->gbif_taxon_key);
+
+        foreach ($keys as $key) {
+            if ($byKey->has($key) || empty($details[$key])) {
+                continue;
+            }
+
+            $detail = $details[$key];
+            $name = SpeciesMerger::stripAuthorship($detail['canonicalName'] ?? $detail['species'] ?? $detail['scientificName'] ?? '');
+            if ($name === '') {
+                continue;
+            }
+
+            $taxon = Taxa::firstOrCreate(['scientific_name' => $name], ['sync_status' => 'pending']);
+            $taxon->fill(array_filter([
+                'gbif_taxon_key' => $key,
+                'kingdom' => $taxon->kingdom ?: ($detail['kingdom'] ?? null),
+                'phylum' => $taxon->phylum ?: ($detail['phylum'] ?? null),
+                'class' => $taxon->class ?: ($detail['class'] ?? null),
+                'order_name' => $taxon->order_name ?: ($detail['order'] ?? null),
+                'family' => $taxon->family ?: ($detail['family'] ?? null),
+                'genus' => $taxon->genus ?: ($detail['genus'] ?? null),
+            ]));
+            if ($taxon->isDirty()) {
+                $taxon->save();
+            }
+            $byKey->put($key, $taxon);
+        }
+
+        return $byKey;
+    }
+
+    private function inatCard(array $taxon, array $idsByName, array $filters = []): array
+    {
+        $photo = $taxon['default_photo'] ?? null;
+        // species_counts no siempre trae el estatus en Colombia; si la lista se
+        // pidió filtrada por endémicas o nativas, iNaturalist ya lo garantizó.
+        $endemic = $taxon['endemic'] || ! empty($filters['endemic']);
+        $native = $taxon['native'] || $endemic || ! empty($filters['native']);
+
+        return [
+            'id' => $idsByName[$taxon['scientific_name']] ?? null,
+            'scientific_name' => $taxon['scientific_name'],
+            'common_name' => $taxon['common_name'],
+            'default_photo' => $photo ? [
+                'url' => $photo['medium_url'] ?? $photo['url'] ?? null,
+                'attribution' => $photo['attribution'] ?? null,
+            ] : null,
+            'is_native' => $native,
+            'is_endemic' => $endemic,
+            'is_introduced' => $taxon['introduced'] && ! $native,
+            'is_threatened' => ($taxon['threatened'] ?? false) || ! empty($filters['threatened']),
+            'conservation_status' => $taxon['conservation_status']['status'] ?? null,
+            'group' => $taxon['iconic_taxon_name'] ?? null,
+            'observation_count' => (int) ($taxon['observations_count'] ?? 0),
+            'source' => 'inaturalist',
+        ];
+    }
+
+    private function localCard(Taxa $taxon, string $source, array $extra = []): array
+    {
+        $data = $taxon->enriched_data;
+        $photo = $data['default_photo'] ?? null;
+        $url = is_array($photo) ? ($photo['medium_url'] ?? $photo['url'] ?? null) : null;
+
+        return array_merge([
+            'id' => $taxon->id,
+            'scientific_name' => $taxon->scientific_name,
+            'common_name' => $taxon->common_name,
+            'default_photo' => $url ? ['url' => $url, 'attribution' => $photo['attribution'] ?? null] : null,
+            'is_native' => (bool) ($data['is_native'] ?? false),
+            'is_endemic' => (bool) ($data['is_endemic'] ?? false),
+            'is_introduced' => (bool) ($data['is_introduced'] ?? false),
+            'is_threatened' => in_array($taxon->conservation_status, self::THREATENED_STATUSES, true),
+            'conservation_status' => $taxon->conservation_status,
+            'group' => $taxon->class ?: $taxon->kingdom,
+            'source' => $source,
+        ], $extra);
+    }
+
+    /** Lo que define una zona + filtro para la caché de registros científicos (celdas de ~25 km). */
+    private function scopeSignature(array $filters): array
+    {
+        return [
+            'cell' => isset($filters['lat'], $filters['lng'])
+                ? [round((float) $filters['lat'] * 4) / 4, round((float) $filters['lng'] * 4) / 4, (int) ($filters['radius'] ?? 25)]
+                : 'CO',
+            'group' => $filters['group'] ?? null,
+            'q' => mb_strtolower(trim((string) ($filters['q'] ?? ''))),
+            'native' => ! empty($filters['native']),
+            'endemic' => ! empty($filters['endemic']),
+            'threatened' => ! empty($filters['threatened']),
+        ];
+    }
+
+    private function pagination(int $total, int $perPage, int $page): array
+    {
+        return [
+            'total' => $total,
+            'per_page' => $perPage,
+            'current_page' => $page,
+            'last_page' => max(1, (int) ceil($total / max(1, $perPage))),
+        ];
+    }
+
+    private function emptyPage(int $perPage): array
+    {
+        return ['success' => true, 'data' => [], 'meta' => ['source' => 'inaturalist', 'pagination' => $this->pagination(0, $perPage, 1)]];
     }
 }

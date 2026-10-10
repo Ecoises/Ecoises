@@ -617,6 +617,24 @@ class INaturalistService extends BaseApiService
     }
     
     /**
+     * Mejor coincidencia de un texto libre ("colibrí", "Tangara") en iNaturalist.
+     * Devuelve el ID del taxón o null.
+     */
+    public function autocompleteTaxonId(string $query): ?int
+    {
+        $response = $this->makeRequest('get', '/taxa/autocomplete', [
+            'q' => $query,
+            'per_page' => 1,
+            'locale' => 'es',
+            'preferred_place_id' => config('services.inaturalist.preferred_place_id', 7196),
+        ], true);
+
+        $id = $response['data']['results'][0]['id'] ?? null;
+
+        return $id ? (int) $id : null;
+    }
+
+    /**
      * Lightweight normalizer for list views (species_counts)
      * Keeps only essential fields to render cards quickly
      */
@@ -643,6 +661,7 @@ class INaturalistService extends BaseApiService
             'native' => (bool)($taxonData['native'] ?? false),
             'endemic' => (bool)($taxonData['endemic'] ?? false),
             'introduced' => (bool)($taxonData['introduced'] ?? false),
+            'threatened' => (bool)($taxonData['threatened'] ?? false),
             'preferred_establishment_means' => $taxonData['preferred_establishment_means'] ?? null,
             // Calculate establishment_status_colombia for frontend badges
             'establishment_status_colombia' => ($taxonData['endemic'] ?? false) ? 'endemic' : 

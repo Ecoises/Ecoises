@@ -34,9 +34,9 @@ Route::middleware('throttle:login')->group(function () {
 });
 
 // ── Biodiversidad ───────────────────────────────────────────────────────────
-// Catálogo geográfico (GBIF + iNaturalist)
-Route::get('/explorer/nearby', [ExplorerController::class, 'explore']);
-Route::get('/explorer/national', [ExplorerController::class, 'national']);
+// Explorador: lista con foto (iNaturalist) y registros científicos (GBIF)
+Route::get('/explorer', [ExplorerController::class, 'index']);
+Route::get('/explorer/scientific', [ExplorerController::class, 'scientific']);
 
 // Fichas de especies del catálogo local
 Route::prefix('taxa')->group(function () {

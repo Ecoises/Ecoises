@@ -82,8 +82,17 @@ Regla general: **los controladores validan y responden; la lógica vive en `Serv
 
 ### Biodiversidad
 
-- `GET /api/explorer/nearby` y `/api/explorer/national`: catálogo geográfico. GBIF dice qué especies hay
-  en la zona y el catálogo local (`taxa`) aporta nombres, fotos y estatus (`ExplorerService`).
+- **Explorador** (`ExplorerService`), con dos fuentes y los mismos filtros (zona, grupo, búsqueda, nativas,
+  endémicas, amenazadas, orden):
+  - `GET /api/explorer`: **ciencia ciudadana**. Una sola llamada a iNaturalist (`species_counts`) trae
+    especies con foto y nombre en español. Se guarda en caché 24 h (~0,2 s; 1–2 s la primera vez).
+  - `GET /api/explorer/scientific`: **registros científicos**. Especies con registros en GBIF para la zona
+    menos las que GBIF recibe de iNaturalist (dos consultas de facetas). Se calcula una vez por zona y filtro
+    (2–6 s) y queda en caché 7 días. Mientras se calcula responde `status: building`.
+  - Las zonas con ubicación se agrupan en celdas de ~25 km para reutilizar la caché.
+  - `php artisan explorer:warm` precalcula las listas nacionales por grupo (programado a las 03:00; requiere
+    `php artisan schedule:work` o una tarea programada de Windows).
+  - Peces: en el backbone actual de GBIF no tienen clase, así que se consultan por sus órdenes.
 - `GET /api/taxa/search`, `/api/taxa/{id}`, `/related`, `/observations`: fichas del catálogo local
   (`TaxonCatalogService`).
 - Las listas **nunca** llaman a APIs externas durante la petición: si una especie está incompleta se encola

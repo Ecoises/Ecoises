@@ -29,3 +29,6 @@ Schedule::command('species:sync-stale')
         ]);
     });
 
+
+// Listas nacionales del explorador listas antes de que llegue la primera persona del día.
+Schedule::command('explorer:warm')->dailyAt('03:00')->withoutOverlapping();
