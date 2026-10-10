@@ -61,6 +61,7 @@ class TaxonController extends Controller
 
         $data = $request->boolean('enrich', true) ? $taxon->enriched_data : $taxon->toArray();
         $data['ecological_importance'] = $this->ecology->present($taxon);
+        $data['gbif_taxon_key'] = $this->catalog->ensureGbifKey($taxon);
 
         return response()->json([
             'success' => true,

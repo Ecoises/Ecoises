@@ -5,6 +5,7 @@ namespace App\Services\Biodiversity;
 use App\Jobs\EnrichSpeciesJob;
 use App\Models\Observation;
 use App\Models\Taxa;
+use App\Services\ExternalApi\GbifService;
 use Illuminate\Support\Collection;
 
 /**
@@ -18,7 +19,32 @@ use Illuminate\Support\Collection;
  */
 class TaxonCatalogService
 {
-    public function __construct(private readonly TaxonSyncService $sync) {}
+    public function __construct(
+        private readonly TaxonSyncService $sync,
+        private readonly GbifService $gbif,
+    ) {}
+
+    /**
+     * Clave de GBIF de la especie, necesaria para el mapa de ocurrencias.
+     * Si aún no la tenemos se busca una sola vez y queda guardada.
+     */
+    public function ensureGbifKey(Taxa $taxon): ?string
+    {
+        if ($taxon->gbif_taxon_key) {
+            return (string) $taxon->gbif_taxon_key;
+        }
+
+        $match = $this->gbif->searchTaxon($taxon->scientific_name)['data'][0] ?? [];
+        $isSpecies = in_array($match['matchType'] ?? 'NONE', ['EXACT', 'FUZZY'], true)
+            && in_array($match['rank'] ?? null, ['SPECIES', 'SUBSPECIES'], true);
+        $key = $isSpecies ? ($match['speciesKey'] ?? $match['usageKey'] ?? null) : null;
+
+        if ($key) {
+            $taxon->forceFill(['gbif_taxon_key' => (string) $key])->saveQuietly();
+        }
+
+        return $key ? (string) $key : null;
+    }
 
     /**
      * Busca por nombre científico o común en el catálogo local.
