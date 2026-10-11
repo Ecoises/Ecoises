@@ -112,6 +112,10 @@ Regla general: **los controladores validan y responden; la lógica vive en `Serv
      (`ecology:generate`). Tope diario en `GEMINI_ECOLOGY_DAILY_LIMIT` (500 por defecto).
   - Los textos se publican con la etiqueta "Redactado con IA" y se revisan en *Biodiversidad › Importancia
     ecológica* (revisar, corregir, ocultar o redactar de nuevo).
+- **Taxonomía desde GBIF** (Backbone Taxonomy): la ficha la completa una vez al abrirse
+  (`TaxonCatalogService::ensureGbifTaxonomy`) y `php artisan taxonomy:sync-gbif` la actualiza para todo el
+  catálogo (también busca la clave de GBIF de las especies que llegaron desde iNaturalist). iNaturalist solo
+  rellena rangos que GBIF no trae, como la clase de los peces óseos.
 - `TaxonSyncService` es el único lugar donde un payload de iNaturalist se convierte en un registro local.
   Las reglas de procedencia (nombre común, nativa/endémica/introducida y conservación) viven ahí,
   en `EstablishmentStatusResolver` y en `ConservationStatusResolver`.

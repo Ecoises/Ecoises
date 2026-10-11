@@ -7,6 +7,7 @@ use App\Models\Observation;
 use App\Models\Taxa;
 use App\Services\ExternalApi\GbifService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Lecturas del catálogo local de especies.
@@ -44,6 +45,37 @@ class TaxonCatalogService
         }
 
         return $key ? (string) $key : null;
+    }
+
+    /**
+     * Usa GBIF (Backbone Taxonomy) como fuente de la taxonomía: reino, filo,
+     * clase, orden, familia y género. Se consulta una vez por especie y queda
+     * guardada en `taxa`; si GBIF no trae un rango (p. ej. la clase de los peces
+     * óseos), se conserva el que ya teníamos.
+     */
+    public function ensureGbifTaxonomy(Taxa $taxon): void
+    {
+        $key = $this->ensureGbifKey($taxon);
+        if (! $key || Cache::has("taxonomy:gbif:{$taxon->id}")) {
+            return;
+        }
+
+        $details = $this->gbif->getSpeciesDetails($key);
+        if (! $details) {
+            return;
+        }
+
+        foreach (['kingdom' => 'kingdom', 'phylum' => 'phylum', 'class' => 'class', 'order' => 'order_name', 'family' => 'family', 'genus' => 'genus'] as $gbifField => $column) {
+            if (! empty($details[$gbifField])) {
+                $taxon->{$column} = $details[$gbifField];
+            }
+        }
+
+        if ($taxon->isDirty()) {
+            $taxon->saveQuietly();
+        }
+
+        Cache::put("taxonomy:gbif:{$taxon->id}", true, now()->addDays(90));
     }
 
     /**

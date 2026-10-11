@@ -35,3 +35,6 @@ Schedule::command('explorer:warm')->dailyAt('03:00')->withoutOverlapping();
 
 // Textos de importancia ecológica para las especies más vistas que aún no lo tienen.
 Schedule::command('ecology:generate --limit=200')->dailyAt('03:30')->withoutOverlapping();
+
+// Taxonomía de las especies nuevas desde GBIF (Backbone Taxonomy).
+Schedule::command('taxonomy:sync-gbif')->weeklyOn(0, '04:00')->withoutOverlapping();

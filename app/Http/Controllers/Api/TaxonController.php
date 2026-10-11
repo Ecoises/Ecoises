@@ -61,11 +61,13 @@ class TaxonController extends Controller
         }
 
         $this->queueEcologyIfStale($taxon);
+        $this->catalog->ensureGbifTaxonomy($taxon);
 
         $data = $request->boolean('enrich', true) ? $taxon->enriched_data : $taxon->toArray();
         $data['ecological_importance'] = $this->ecology->present($taxon);
         $data['ecology_text'] = $this->presentEcologyText($taxon);
-        $data['gbif_taxon_key'] = $this->catalog->ensureGbifKey($taxon);
+        $data['gbif_taxon_key'] = $taxon->gbif_taxon_key ? (string) $taxon->gbif_taxon_key : null;
+        $data['taxonomy_source'] = $taxon->gbif_taxon_key ? 'GBIF Backbone Taxonomy' : 'iNaturalist';
 
         return response()->json([
             'success' => true,

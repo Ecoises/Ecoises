@@ -66,9 +66,12 @@ class TaxonSyncService
                     $taxon->common_name = $commonName;
                 }
 
+                // La taxonomía oficial viene de GBIF (TaxonCatalogService::ensureGbifTaxonomy).
+                // iNaturalist solo completa los rangos que aún estén vacíos.
                 foreach ($this->extractTaxonomy($taxonData) as $rank => $name) {
-                    if ($name && isset(self::TAXONOMY_FIELDS[$rank])) {
-                        $taxon->{self::TAXONOMY_FIELDS[$rank]} = $name;
+                    $field = self::TAXONOMY_FIELDS[$rank] ?? null;
+                    if ($name && $field && empty($taxon->{$field})) {
+                        $taxon->{$field} = $name;
                     }
                 }
 
