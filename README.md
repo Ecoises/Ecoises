@@ -116,6 +116,11 @@ Regla general: **los controladores validan y responden; la lógica vive en `Serv
   (`TaxonCatalogService::ensureGbifTaxonomy`) y `php artisan taxonomy:sync-gbif` la actualiza para todo el
   catálogo (también busca la clave de GBIF de las especies que llegaron desde iNaturalist). iNaturalist solo
   rellena rangos que GBIF no trae, como la clase de los peces óseos.
+- **Etiquetas oficiales de conservación y origen** (`ConservationLabelService`, sin token):
+  amenaza en Colombia (MinAmbiente, Res. 0126 de 2024), amenaza global (Lista Roja de la UICN vía GBIF),
+  aves endémicas y casi endémicas (Instituto Humboldt) e introducidas (GRIIS Colombia). Para otros grupos, la
+  bandera endémica o nativa de iNaturalist. `php artisan checklists:sync` descarga las listas y la UICN
+  (mensual); la ficha y el explorador leen la tabla `colombia_species_lists` y muestran la fuente.
 - `TaxonSyncService` es el único lugar donde un payload de iNaturalist se convierte en un registro local.
   Las reglas de procedencia (nombre común, nativa/endémica/introducida y conservación) viven ahí,
   en `EstablishmentStatusResolver` y en `ConservationStatusResolver`.

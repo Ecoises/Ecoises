@@ -38,3 +38,6 @@ Schedule::command('ecology:generate --limit=200')->dailyAt('03:30')->withoutOver
 
 // Taxonomía de las especies nuevas desde GBIF (Backbone Taxonomy).
 Schedule::command('taxonomy:sync-gbif')->weeklyOn(0, '04:00')->withoutOverlapping();
+
+// Listas oficiales de Colombia (Res. 0126/2024, endémicas, GRIIS) y UICN, una vez al mes.
+Schedule::command('checklists:sync')->monthlyOn(1, '04:30')->withoutOverlapping();

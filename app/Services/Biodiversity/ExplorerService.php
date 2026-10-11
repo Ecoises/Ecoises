@@ -43,6 +43,7 @@ class ExplorerService
     public function __construct(
         protected GbifService $gbif,
         protected INaturalistService $inat,
+        protected ConservationLabelService $labels,
     ) {}
 
     /**
@@ -78,11 +79,13 @@ class ExplorerService
 
         return [
             'success' => true,
-            'data' => $species
-                ->map(fn (array $taxon) => $this->inatCard($taxon, $idsByName, $filters))
-                ->filter(fn ($card) => $card['id'])
-                ->values()
-                ->all(),
+            'data' => $this->applyOfficialLabels(
+                $species
+                    ->map(fn (array $taxon) => $this->inatCard($taxon, $idsByName, $filters))
+                    ->filter(fn ($card) => $card['id'])
+                    ->values()
+                    ->all()
+            ),
             'meta' => [
                 'source' => 'inaturalist',
                 'scope' => isset($params['lat']) ? 'nearby' : 'national',
@@ -138,7 +141,7 @@ class ExplorerService
         return [
             'success' => true,
             'status' => 'ready',
-            'data' => $cards->all(),
+            'data' => $this->applyOfficialLabels($cards->all()),
             'meta' => ['source' => 'gbif', 'pagination' => $this->pagination($total, $perPage, $page)],
         ];
     }
@@ -393,6 +396,40 @@ class ExplorerService
             'group' => $taxon->class ?: $taxon->kingdom,
             'source' => $source,
         ], $extra);
+    }
+
+    /**
+     * Sustituye el estatus de las tarjetas por las etiquetas oficiales
+     * (Res. 0126/2024, UICN, Humboldt, GRIIS) para que coincidan con la ficha.
+     */
+    private function applyOfficialLabels(array $cards): array
+    {
+        $taxa = Taxa::whereIn('id', array_column($cards, 'id'))
+            ->get(['id', 'scientific_name', 'gbif_taxon_key', 'iucn_category', 'iucn_taxon_id', 'is_native', 'is_endemic', 'is_introduced']);
+        $labels = $this->labels->labelsForMany($taxa);
+
+        return array_map(function (array $card) use ($labels) {
+            $label = $labels[$card['id']] ?? null;
+            if (! $label) {
+                return $card;
+            }
+
+            $conservation = $label['national'] ?? $label['global'];
+            if ($conservation) {
+                $card['conservation_status'] = $conservation['code'];
+                $card['conservation_scope'] = $conservation['scope'];
+                $card['is_threatened'] = in_array($conservation['code'], self::THREATENED_STATUSES, true);
+            }
+
+            if ($origin = $label['origin']) {
+                $card['is_endemic'] = $origin['status'] === 'endemic';
+                $card['is_near_endemic'] = $origin['status'] === 'near_endemic';
+                $card['is_introduced'] = $origin['status'] === 'introduced';
+                $card['is_native'] = in_array($origin['status'], ['native', 'endemic', 'near_endemic'], true);
+            }
+
+            return $card;
+        }, $cards);
     }
 
     /** Lo que define una zona + filtro para la caché de registros científicos (celdas de ~25 km). */

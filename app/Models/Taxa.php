@@ -33,6 +33,10 @@ class Taxa extends Model
         'conservation_status_authority',
         'conservation_status_url',
         'conservation_status_synced_at',
+        // Lista Roja de la UICN (vía GBIF)
+        'iucn_category',
+        'iucn_taxon_id',
+        'iucn_synced_at',
         'is_native',
         'is_endemic',
         'is_introduced',
@@ -63,6 +67,7 @@ class Taxa extends Model
         'last_observed_at' => 'datetime',
         'last_synced_at' => 'datetime',
         'conservation_status_synced_at' => 'datetime',
+        'iucn_synced_at' => 'datetime',
     ];
 
     // Relaciones

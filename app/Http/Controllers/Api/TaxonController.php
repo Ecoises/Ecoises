@@ -7,6 +7,7 @@ use App\Jobs\EnrichSpeciesEcologyJob;
 use App\Jobs\GenerateEcologyTextJob;
 use App\Jobs\SyncSpeciesInteractionsJob;
 use App\Models\Taxa;
+use App\Services\Biodiversity\ConservationLabelService;
 use App\Services\Biodiversity\EcologicalImportanceService;
 use App\Services\Biodiversity\EcologyTextService;
 use App\Services\Biodiversity\TaxonCatalogService;
@@ -23,6 +24,7 @@ class TaxonController extends Controller
         private readonly TaxonCatalogService $catalog,
         private readonly EcologicalImportanceService $ecology,
         private readonly EcologyTextService $ecologyTexts,
+        private readonly ConservationLabelService $labels,
     ) {}
 
     /**
@@ -63,9 +65,16 @@ class TaxonController extends Controller
         $this->queueEcologyIfStale($taxon);
         $this->catalog->ensureGbifTaxonomy($taxon);
 
+        // Categoría UICN (vía GBIF): se consulta una vez por especie y queda guardada.
+        if ($taxon->gbif_taxon_key && ! $taxon->iucn_synced_at) {
+            $this->labels->syncIucn(collect([$taxon]));
+        }
+
         $data = $request->boolean('enrich', true) ? $taxon->enriched_data : $taxon->toArray();
         $data['ecological_importance'] = $this->ecology->present($taxon);
         $data['ecology_text'] = $this->presentEcologyText($taxon);
+        // Etiquetas oficiales: amenaza en Colombia, UICN global y origen, cada una con su fuente.
+        $data['labels'] = $this->labels->labelsFor($taxon);
         $data['gbif_taxon_key'] = $taxon->gbif_taxon_key ? (string) $taxon->gbif_taxon_key : null;
         $data['taxonomy_source'] = $taxon->gbif_taxon_key ? 'GBIF Backbone Taxonomy' : 'iNaturalist';
 
