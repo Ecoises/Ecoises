@@ -85,21 +85,18 @@ class INaturalistService extends BaseApiService
             'params' => $defaultParams
         ]);
 
-        // El dominio web oficial usa una ruta de red distinta y es más estable en
-        // entornos donde api.inaturalist.org no tiene conectividad.
-        $fallback = $this->getTaxonFromWebsite($id, $defaultParams['locale'] ?? 'es');
+        // Primero la API oficial: es la única que trae la taxonomía completa
+        // (ancestors). El sitio web queda como respaldo si la API no responde.
+        $response = $this->makeRequest('get', "/taxa/{$id}", $defaultParams);
+        $taxonData = $response['success'] ? ($response['data']['results'][0] ?? null) : null;
 
-        if ($fallback['success']) {
+        if (!$taxonData) {
+            $fallback = $this->getTaxonFromWebsite($id, $defaultParams['locale'] ?? 'es');
+            if (!$fallback['success']) {
+                return $response['success'] ? $fallback : $response;
+            }
             $taxonData = $fallback['data'];
             $response = $fallback;
-        } else {
-            $response = $this->makeRequest('get', "/taxa/{$id}", $defaultParams);
-
-            if (!$response['success']) {
-                return $response;
-            }
-
-            $taxonData = $response['data']['results'][0] ?? null;
         }
         
         if (!is_array($taxonData)) {

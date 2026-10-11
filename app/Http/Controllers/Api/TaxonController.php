@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\EnrichSpeciesEcologyJob;
+use App\Jobs\GenerateEcologyTextJob;
 use App\Jobs\SyncSpeciesInteractionsJob;
 use App\Models\Taxa;
 use App\Services\Biodiversity\EcologicalImportanceService;
+use App\Services\Biodiversity\EcologyTextService;
 use App\Services\Biodiversity\TaxonCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +22,7 @@ class TaxonController extends Controller
     public function __construct(
         private readonly TaxonCatalogService $catalog,
         private readonly EcologicalImportanceService $ecology,
+        private readonly EcologyTextService $ecologyTexts,
     ) {}
 
     /**
@@ -61,6 +64,7 @@ class TaxonController extends Controller
 
         $data = $request->boolean('enrich', true) ? $taxon->enriched_data : $taxon->toArray();
         $data['ecological_importance'] = $this->ecology->present($taxon);
+        $data['ecology_text'] = $this->presentEcologyText($taxon);
         $data['gbif_taxon_key'] = $this->catalog->ensureGbifKey($taxon);
 
         return response()->json([
@@ -118,5 +122,22 @@ class TaxonController extends Controller
         if ($this->ecology->needsSync($taxon)) {
             SyncSpeciesInteractionsJob::dispatch($taxon->id);
         }
+
+        // Primera visita a una especie sin texto: se redacta una vez, en segundo plano.
+        if ($this->ecologyTexts->needsText($taxon)) {
+            GenerateEcologyTextJob::dispatch($taxon->id)->delay(now()->addSeconds(20));
+        }
+    }
+
+    private function presentEcologyText(Taxa $taxon): ?array
+    {
+        $text = $this->ecologyTexts->textFor($taxon);
+
+        return $text ? [
+            'text' => $text->text,
+            'sources' => $text->sources ?? [],
+            'reviewed' => $text->status === \App\Models\SpeciesEcologyText::STATUS_REVIEWED,
+            'generated_at' => $text->generated_at,
+        ] : null;
     }
 }

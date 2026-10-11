@@ -77,6 +77,11 @@ class Taxa extends Model
         return $this->hasMany(TaxonApiReference::class, 'taxon_id');
     }
     
+    public function ecologyText(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(SpeciesEcologyText::class, 'taxon_id');
+    }
+
     public function identifications(): HasMany
     {
         return $this->hasMany(Identification::class, 'taxon_id');

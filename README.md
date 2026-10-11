@@ -103,6 +103,15 @@ Regla general: **los controladores validan y responden; la lógica vive en `Serv
   (`SyncSpeciesInteractionsJob`) la primera vez que alguien abre la ficha y se renueva cada 6 meses.
   Un rol solo se afirma si hay suficientes registros, y las especies relacionadas que ya están en el
   catálogo aparecen con su nombre común y un enlace a su ficha.
+- **Importancia ecológica para todas las especies**, en capas:
+  1. Interacciones propias de la especie (GloBI).
+  2. Si no hay, las de su género y luego su familia (GloBI, en caché 30 días). La ficha lo aclara.
+  3. Un párrafo por especie redactado con IA (`EcologyTextService`, Gemini Flash Lite) **solo con hechos
+     verificados** (taxonomía, estatus, Wikipedia, EOL, GloBI). Se genera **una vez por especie** en la cola
+     (`GenerateEcologyTextJob`) la primera vez que alguien abre la ficha, y cada noche para las más observadas
+     (`ecology:generate`). Tope diario en `GEMINI_ECOLOGY_DAILY_LIMIT` (500 por defecto).
+  - Los textos se publican con la etiqueta "Redactado con IA" y se revisan en *Biodiversidad › Importancia
+    ecológica* (revisar, corregir, ocultar o redactar de nuevo).
 - `TaxonSyncService` es el único lugar donde un payload de iNaturalist se convierte en un registro local.
   Las reglas de procedencia (nombre común, nativa/endémica/introducida y conservación) viven ahí,
   en `EstablishmentStatusResolver` y en `ConservationStatusResolver`.

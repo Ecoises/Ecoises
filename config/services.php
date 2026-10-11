@@ -39,8 +39,10 @@ return [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI'),
-        // Gemini (curiosidades diarias)
+        // Gemini (curiosidades diarias y textos de importancia ecológica)
         'gemini_key' => env('GOOGLE_AI_STUDIO_KEY'),
+        'ecology_model' => env('GEMINI_ECOLOGY_MODEL', 'gemini-flash-lite-latest'),
+        'ecology_daily_limit' => (int) env('GEMINI_ECOLOGY_DAILY_LIMIT', 500),
     ],
     'inaturalist' => [
         'base_url' => env('INATURALIST_BASE_URL', 'https://api.inaturalist.org/v1'),

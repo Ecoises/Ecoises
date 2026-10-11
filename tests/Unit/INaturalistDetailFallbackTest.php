@@ -3,16 +3,40 @@
 namespace Tests\Unit;
 
 use App\Services\ExternalApi\INaturalistService;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 class INaturalistDetailFallbackTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Schema::create('unified_api_caches', function (Blueprint $table): void {
+            $table->id();
+            $table->string('cache_key')->unique();
+            $table->string('cache_type')->nullable();
+            $table->string('api_source')->nullable();
+            $table->string('data_type')->nullable();
+            $table->text('request_url')->nullable();
+            $table->json('request_params')->nullable();
+            $table->json('response_data');
+            $table->json('response_metadata')->nullable();
+            $table->timestamp('expires_at');
+            $table->timestamp('last_accessed_at')->nullable();
+            $table->integer('hit_count')->default(0);
+            $table->timestamps();
+        });
+    }
+
     #[Test]
-    public function it_recovers_a_rich_taxon_detail_from_the_official_website(): void
+    public function it_recovers_a_rich_taxon_detail_from_the_official_website_when_the_api_fails(): void
     {
         Http::fake([
+            'api.inaturalist.org/*' => Http::response(['error' => 'down'], 503),
             'www.inaturalist.org/*' => Http::response([
                 'id' => 5050,
                 'name' => 'Tigrisoma fasciatum',

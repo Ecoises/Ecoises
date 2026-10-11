@@ -32,3 +32,6 @@ Schedule::command('species:sync-stale')
 
 // Listas nacionales del explorador listas antes de que llegue la primera persona del día.
 Schedule::command('explorer:warm')->dailyAt('03:00')->withoutOverlapping();
+
+// Textos de importancia ecológica para las especies más vistas que aún no lo tienen.
+Schedule::command('ecology:generate --limit=200')->dailyAt('03:30')->withoutOverlapping();
