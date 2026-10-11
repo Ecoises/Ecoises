@@ -70,6 +70,17 @@ class EducationalContent extends Model
 
     // Relationships
 
+    /**
+     * Los conteos del catálogo (filtros de la página Aprende) se guardan en caché;
+     * se limpian al crear, publicar, editar o borrar un contenido.
+     */
+    protected static function booted(): void
+    {
+        $forget = fn () => \Illuminate\Support\Facades\Cache::forget('learn:facets:v1');
+        static::saved($forget);
+        static::deleted($forget);
+    }
+
     public function author(): BelongsTo
     {
         return $this->belongsTo(User::class, 'author_id');

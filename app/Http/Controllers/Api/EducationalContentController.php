@@ -7,7 +7,6 @@ use App\Models\EducationalContent;
 use App\Services\Learning\ActivityEvaluationService;
 use App\Services\Learning\ContentProgressService;
 use Illuminate\Http\Request;
-use Laravel\Sanctum\PersonalAccessToken;
 
 class EducationalContentController extends Controller
 {
@@ -21,32 +20,76 @@ class EducationalContentController extends Controller
     }
 
     /**
-     * Display a listing of the published educational contents.
+     * GET /educational-contents — catálogo publicado, paginado y liviano.
+     *
+     * Devuelve solo los campos de la tarjeta (sin cuerpo de lecciones ni datos
+     * del autor más allá de nombre y avatar) y, en `meta.facets`, cuántos
+     * contenidos hay por tipo, nivel y categoría, para que la interfaz solo
+     * muestre filtros que tienen resultados.
      */
     public function index(Request $request)
     {
+        $validated = $request->validate([
+            'q' => 'sometimes|nullable|string|max:120',
+            'search' => 'sometimes|nullable|string|max:120', // nombre antiguo
+            'type' => 'sometimes|nullable|in:course,article,resource',
+            'level' => 'sometimes|nullable|in:principiante,intermedio,avanzado',
+            'category' => 'sometimes|nullable|string|max:120',
+            'page' => 'sometimes|integer|min:1',
+            'per_page' => 'sometimes|integer|min:6|max:48',
+        ]);
+
+        $search = trim((string) ($validated['q'] ?? $validated['search'] ?? ''));
+
         $query = EducationalContent::published()
-            ->with(['categories', 'author']); // Eager load necessary relationships
+            ->select(['id', 'title', 'slug', 'description', 'thumbnail_url', 'content_type', 'difficulty_level', 'estimated_duration', 'author_id', 'rating_average', 'rating_count', 'view_count', 'is_featured', 'published_at'])
+            ->with(['categories:id,name,slug', 'author:id,full_name,avatar'])
+            ->withCount(['lessons' => fn ($lessons) => $lessons->where('is_published', true)])
+            ->when($search !== '', fn ($q) => $q->where(fn ($inner) => $inner
+                ->where('title', 'like', "%{$search}%")
+                ->orWhere('description', 'like', "%{$search}%")))
+            ->when($validated['type'] ?? null, fn ($q, $type) => $q->where('content_type', $type))
+            ->when($validated['level'] ?? null, fn ($q, $level) => $q->where('difficulty_level', $level))
+            ->when($validated['category'] ?? null, fn ($q, $category) => $q->whereHas('categories', fn ($c) => $c->where('slug', $category)->orWhere('name', $category)))
+            ->orderByDesc('is_featured')
+            ->orderByDesc('published_at');
 
-        // Search functionality
-        if ($request->has('search')) {
-            $searchTerm = $request->input('search');
-            $query->where(function ($q) use ($searchTerm) {
-                $q->where('title', 'like', "%{$searchTerm}%")
-                    ->orWhere('description', 'like', "%{$searchTerm}%");
-            });
-        }
+        $page = $query->paginate((int) ($validated['per_page'] ?? 24));
 
-        // Apply filters if needed (e.g. by category, level) - Keeping it simple for now as per plan
-        if ($request->has('category')) {
-            $query->whereHas('categories', function ($q) use ($request) {
-                $q->where('name', $request->input('category'));
-            });
-        }
+        return response()->json([
+            'data' => $page->items(),
+            'meta' => [
+                'pagination' => [
+                    'total' => $page->total(),
+                    'per_page' => $page->perPage(),
+                    'current_page' => $page->currentPage(),
+                    'last_page' => $page->lastPage(),
+                ],
+                'facets' => $this->facets(),
+            ],
+        ]);
+    }
 
-        $contents = $query->orderBy('created_at', 'desc')->get();
+    /**
+     * Conteos del catálogo publicado (sin filtros), en caché 5 minutos.
+     */
+    private function facets(): array
+    {
+        return \Illuminate\Support\Facades\Cache::remember('learn:facets:v1', 300, function () {
+            $published = fn () => EducationalContent::published();
 
-        return response()->json($contents);
+            return [
+                'total' => $published()->count(),
+                'types' => $published()->selectRaw('content_type, count(*) as total')->groupBy('content_type')->pluck('total', 'content_type'),
+                'levels' => $published()->selectRaw('difficulty_level, count(*) as total')->groupBy('difficulty_level')->pluck('total', 'difficulty_level'),
+                'categories' => \App\Models\ContentCategory::query()
+                    ->select(['id', 'name', 'slug'])
+                    ->whereHas('content', fn ($q) => $q->published())
+                    ->withCount(['content as total' => fn ($q) => $q->published()])
+                    ->orderBy('name')
+                    ->get(),
+            ];
+        });
     }
 
     /**
@@ -73,21 +116,8 @@ class EducationalContentController extends Controller
             ])
             ->firstOrFail();
 
-        // Resolve authenticated user (optional): prefer request()->user(), then fallback to Sanctum token if available
-        $user = request()->user();
-        if (! $user) {
-            try {
-                $bearer = request()->bearerToken();
-                if ($bearer && class_exists(\Laravel\Sanctum\PersonalAccessToken::class) && \Illuminate\Support\Facades\Schema::hasTable('personal_access_tokens')) {
-                    $accessToken = PersonalAccessToken::findToken($bearer);
-                    if ($accessToken && $accessToken->tokenable) {
-                        $user = $accessToken->tokenable;
-                    }
-                }
-            } catch (\Throwable $e) {
-                // Optional auth must never break public show; ignore errors
-            }
-        }
+        // Sesión opcional: la ruta es pública, pero si llega un token se añade el progreso.
+        $user = request()->user('sanctum');
 
         // If user is authenticated, attach enrollment and progress
         if ($user) {

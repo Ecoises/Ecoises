@@ -168,7 +168,8 @@ class EducationalContentCoreTest extends TestCase
 
         $this->getJson('/api/educational-contents')
             ->assertOk()
-            ->assertExactJson([]);
+            ->assertJsonPath('data', [])
+            ->assertJsonPath('meta.facets.total', 0);
     }
 
     public function test_a_complete_article_can_be_published_atomically(): void
