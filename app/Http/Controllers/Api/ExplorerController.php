@@ -12,7 +12,7 @@ use Illuminate\Validation\Rule;
  * Explorador de especies.
  *
  *  GET /api/explorer             → lista principal (iNaturalist, con foto)
- *  GET /api/explorer/scientific  → registros científicos de GBIF que no están en la lista principal
+ *  GET /api/explorer/scientific  → todas las especies con registros en GBIF
  *
  * Ambos aceptan los mismos filtros. Sin lat/lng el alcance es todo Colombia.
  */

@@ -18,10 +18,10 @@ use Illuminate\Support\Facades\Cache;
  *     llamada trae especies con foto y nombre común en español, ya filtradas por
  *     zona, grupo, nativas, endémicas y amenazadas. Es la lista que se ve primero.
  *
- *  2. scientificRecords() → GBIF. Especies con registros científicos en la zona
- *     (colecciones, museos, monitoreos) que iNaturalist no tiene. Se calcula una
- *     vez por zona y filtro, se guarda en caché una semana y se pide aparte, así
- *     nunca retrasa la lista principal.
+ *  2. scientificRecords() → GBIF. Todas las especies con registros en GBIF para
+ *     la zona (colecciones, museos, monitoreos y también las que GBIF recibe de
+ *     iNaturalist). Se calcula una vez por zona y filtro, se guarda en caché una
+ *     semana y se pide aparte, así nunca retrasa la lista principal.
  *
  * Las especies que aparecen se guardan en `taxa` para que su ficha abra al instante.
  */
@@ -33,10 +33,7 @@ class ExplorerService
 
     private const SCIENTIFIC_TTL = 604800;     // 7 días
 
-    private const SCIENTIFIC_CANDIDATES = 2000; // especies de GBIF consideradas por zona
-
-    /** Dataset "iNaturalist Research-grade Observations" dentro de GBIF. */
-    private const INAT_DATASET_KEY = '50c9509d-22c7-4a22-a47d-8c48425ef4a7';
+    private const SCIENTIFIC_CANDIDATES = 10000; // máximo de especies de GBIF por zona
 
     private const THREATENED_STATUSES = ['VU', 'EN', 'CR'];
 
@@ -95,15 +92,14 @@ class ExplorerService
     }
 
     /**
-     * Registros científicos de GBIF que no aparecen en iNaturalist para la misma
-     * zona y filtros. Si es la primera vez que alguien pide esa combinación, se
+     * Todas las especies con registros en GBIF para la zona y filtros. Si es la primera vez que alguien pide esa combinación, se
      * calcula en esta petición (unos segundos) y queda en caché una semana.
      */
     public function scientificRecords(array $filters): array
     {
         $perPage = (int) ($filters['per_page'] ?? 24);
         $page = max(1, (int) ($filters['page'] ?? 1));
-        $key = 'explorer:scientific:v4:'.sha1(json_encode($this->scopeSignature($filters)));
+        $key = 'explorer:scientific:v5:'.sha1(json_encode($this->scopeSignature($filters)));
 
         $entries = Cache::get($key);
         if ($entries === null) {
@@ -147,8 +143,7 @@ class ExplorerService
     }
 
     /**
-     * Especies con registros en GBIF para la zona menos las que GBIF recibe de
-     * iNaturalist: dos consultas de facetas, sin comparar nombres uno a uno.
+     * Especies con registros en GBIF para la zona, de la más a la menos registrada.
      *
      * @return array<int, array{species_key: string, occurrence_count: int}>
      */
@@ -161,11 +156,8 @@ class ExplorerService
         ]);
 
         $all = $this->gbifCatalog($filters, $gbifFilters);
-        $citizen = $this->gbifCatalog($filters, ['dataset_key' => self::INAT_DATASET_KEY, 'catalog_limit' => 10000] + $gbifFilters);
-        $citizenKeys = collect($citizen['data']['buckets'] ?? [])->pluck('species_key')->map(fn ($key) => (string) $key)->flip();
 
         $entries = collect($all['data']['buckets'] ?? [])
-            ->reject(fn (array $bucket) => $citizenKeys->has((string) $bucket['species_key']))
             ->map(fn (array $bucket) => ['species_key' => (string) $bucket['species_key'], 'occurrence_count' => (int) $bucket['occurrence_count']])
             ->values();
 
