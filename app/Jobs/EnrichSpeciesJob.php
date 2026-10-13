@@ -57,10 +57,9 @@ class EnrichSpeciesJob implements ShouldQueue, ShouldBeUnique
 
         Log::info("🔄 Enriqueciendo especie: {$cleanName} (original: {$this->canonicalName})");
 
-        // Buscar por nombre original o limpio; crear si no existe
-        $taxon = Taxa::where('scientific_name', $this->canonicalName)
-            ->orWhere('scientific_name', $cleanName)
-            ->first();
+        // Primero la especie con el nombre limpio; si solo existe con autor, se renombra.
+        $taxon = Taxa::where('scientific_name', $cleanName)->first()
+            ?? Taxa::where('scientific_name', $this->canonicalName)->first();
 
         if (!$taxon) {
             try {

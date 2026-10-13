@@ -8,32 +8,58 @@ use Illuminate\Support\Facades\Log;
 
 class SpeciesMerger
 {
+    /** Partículas de autor en minúscula que no son epítetos ("de Candolle", "van Hasselt"). */
+    private const AUTHOR_PARTICLES = ['de', 'del', 'da', 'dos', 'du', 'la', 'le', 'van', 'von', 'der', 'ex', 'et', 'in'];
+
     /**
-     * Limpia la autoría de un nombre científico ("Rhetus arcius (Linnaeus, 1763)" → "Rhetus arcius")
+     * Limpia la autoría de un nombre científico:
+     *   "Rhetus arcius (Linnaeus, 1763)"     → "Rhetus arcius"
+     *   "Quiscalus lugubris Swainson, 1838"  → "Quiscalus lugubris"
+     *   "Tangara gyrola toddi Bond, 1950"    → "Tangara gyrola toddi"
+     *   "Quiscalus Vieillot, 1816"           → "Quiscalus"
+     *   "Passiflora tarminiana × tripartita" → sin cambios (híbrido)
+     * Respeta "sp." y los rangos infraespecíficos (subsp., var., f.).
+     * El autor siempre empieza con mayúscula o paréntesis; los epítetos van en minúscula.
      */
     public static function stripAuthorship(string $name): string
     {
-        $pattern = '/^([A-Z][a-z\-]+)\s+(?:[×x]\s+)?([a-z\-]+)(?:\s+(?:subsp\.|var\.|f\.|subspecies)\s+([a-z\-]+)|(?:\s+([a-z\-]+)))?/iu';
-        if (preg_match($pattern, $name, $matches)) {
-            $genus = $matches[1];
-            $hybrid = str_contains($matches[0], ' × ') ? ' × ' : (str_contains($matches[0], ' x ') ? ' x ' : ' ');
-            $species = $matches[2];
-            
-            $clean = $genus . $hybrid . $species;
-            
-            if (!empty($matches[3])) {
-                if (preg_match('/\s+(subsp\.|var\.|f\.|subspecies)\s+/i', $name, $rankMatches)) {
-                    $clean .= ' ' . $rankMatches[1] . ' ' . $matches[3];
-                }
-            } elseif (!empty($matches[4])) {
-                $infra = $matches[4];
-                if (ctype_lower(str_replace('-', '', $infra))) {
-                    $clean .= ' ' . $infra;
-                }
+        $name = trim(preg_replace('/\s+/u', ' ', $name));
+
+        $pattern = '/^(?<genus>[A-Z][a-z\-]+)(?<hybrid> [×x])? (?<species>[a-z\-]+\.?)'
+            .'(?: (?<rank>subsp\.|ssp\.|var\.|f\.|subspecies) (?<infra>[a-z\-]+)| [×x] (?<cross>[a-z\-]+)| (?<infra2>[a-z\-]+)(?= |$))?/u';
+
+        if (preg_match($pattern, $name, $m)) {
+            $clean = $m['genus'].(! empty($m['hybrid']) ? ' × ' : ' ').$m['species'];
+
+            if (! empty($m['cross'])) {
+                $clean .= ' × '.$m['cross'];
+            } elseif (! empty($m['rank']) && ! empty($m['infra'])) {
+                $clean .= ' '.$m['rank'].' '.$m['infra'];
+            } elseif (! empty($m['infra2']) && ! in_array($m['infra2'], self::AUTHOR_PARTICLES, true)) {
+                $clean .= ' '.$m['infra2'];
             }
+
             return $clean;
         }
+
+        // Solo género (o un taxón superior) seguido del autor.
+        if (preg_match('/^([A-Z][a-z\-]+) (?:\(|[A-Z])/u', $name, $m)) {
+            return $m[1];
+        }
+
         return trim(preg_replace('/\s*\(.*?\)\s*$/', '', $name));
+    }
+
+    /** Lo que sobra del nombre después de quitar la parte científica: el autor y el año. */
+    public static function authorship(string $name): ?string
+    {
+        $name = trim(preg_replace('/\s+/u', ' ', $name));
+        $clean = self::stripAuthorship($name);
+        if ($clean === $name || ! str_starts_with($name, $clean)) {
+            return null;
+        }
+
+        return trim(substr($name, strlen($clean)), " ,") ?: null;
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Biodiversity\SpeciesMerger;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -90,6 +91,27 @@ class Taxa extends Model
     public function identifications(): HasMany
     {
         return $this->hasMany(Identification::class, 'taxon_id');
+    }
+
+    /**
+     * El nombre científico se guarda siempre sin autor ("Quiscalus lugubris",
+     * no "Quiscalus lugubris Swainson, 1838"); el autor va a `taxon_author`.
+     * Así las búsquedas de fotos y nombres en iNaturalist encuentran la especie.
+     */
+    public function setScientificNameAttribute(?string $value): void
+    {
+        if ($value === null) {
+            $this->attributes['scientific_name'] = null;
+
+            return;
+        }
+
+        $this->attributes['scientific_name'] = SpeciesMerger::stripAuthorship($value);
+
+        $author = SpeciesMerger::authorship($value);
+        if ($author && empty($this->attributes['taxon_author'])) {
+            $this->attributes['taxon_author'] = mb_substr($author, 0, 255);
+        }
     }
 
     /**
