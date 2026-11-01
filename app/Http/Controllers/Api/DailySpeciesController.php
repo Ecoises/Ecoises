@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\SpeciesEcologyText;
 use App\Models\Taxa;
+use App\Services\Biodiversity\ConservationLabelService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class DailySpeciesController extends Controller
 {
@@ -145,21 +148,13 @@ class DailySpeciesController extends Controller
         return $results;
     }
 
-    public function speciesOfTheDay()
+    public function speciesOfTheDay(ConservationLabelService $labels)
     {
         $date = now()->format('Y-m-d');
-        $cacheKey = "daily_recommendation_{$date}";
+        $cacheKey = "daily_recommendation_v2_{$date}";
 
-        $species = Cache::remember($cacheKey, 60 * 60 * 24, function () {
-            // Get random taxon with good photo
-            $taxon = Taxa::whereHas('apiReferences') // Ensure it has some external data
-                ->inRandomOrder()
-                ->limit(20) // Get a pool to check for good photos
-                ->get()
-                ->filter(function ($t) {
-                    return !empty($t->enriched_data['default_photo']['medium_url']);
-                })
-                ->first();
+        $species = Cache::remember($cacheKey, 60 * 60 * 24, function () use ($labels) {
+            $taxon = $this->pickDailyTaxon();
 
             if (!$taxon) {
                 // Return a placeholder if no species exist in DB
@@ -169,22 +164,23 @@ class DailySpeciesController extends Controller
                     'scientificName' => 'Incertae sedis',
                     'image' => "https://images.unsplash.com/photo-1518531933037-9a8473035e52?auto=format&fit=crop&w=800&h=500",
                     'description' => "Aún no hay especies registradas en la base de datos. ¡Pronto verás maravillas aquí!",
+                    'facts' => [],
                     'date' => now()->format('Y-m-d'),
                     'author' => 'Sistema',
                 ];
             }
 
             $enriched = $taxon->enriched_data;
-            
+
             return [
                 'id' => $taxon->id,
                 'name' => $taxon->common_name ?? $taxon->scientific_name,
                 'scientificName' => $taxon->scientific_name,
-                'image' => $enriched['default_photo']['medium_url'] 
-                         ?? $enriched['default_photo']['url'] 
+                'image' => $enriched['default_photo']['medium_url']
+                         ?? $enriched['default_photo']['url']
                          ?? "https://images.unsplash.com/photo-1518531933037-9a8473035e52?auto=format&fit=crop&w=800&h=500",
-                'description' => $enriched['wikipedia_summary'] 
-                               ?? "Descubre la biodiversidad de Colombia con el {$taxon->common_name}.",
+                'description' => $this->describe($taxon, $enriched),
+                'facts' => $this->facts($taxon, $labels->labelsFor($taxon)),
                 'date' => now()->format('Y-m-d'),
                 'author' => $enriched['default_photo']['attribution'] ?? 'Desconocido',
             ];
@@ -193,5 +189,80 @@ class DailySpeciesController extends Controller
         return response()->json($species);
     }
 
+    /**
+     * Especie con foto, prefiriendo las que ya tienen texto propio en la BD
+     * (párrafo ecológico) para que la descripción no sea genérica.
+     */
+    private function pickDailyTaxon(): ?Taxa
+    {
+        $withPhoto = fn ($t) => !empty($t->enriched_data['default_photo']['medium_url'])
+            || !empty($t->enriched_data['default_photo']['url']);
 
+        $pool = fn ($query) => $query->with(['apiReferences', 'ecologyText'])
+            ->whereHas('apiReferences')
+            ->inRandomOrder()
+            ->limit(20)
+            ->get()
+            ->first($withPhoto);
+
+        return $pool(Taxa::whereHas('ecologyText', fn ($q) => $q->where('status', '!=', SpeciesEcologyText::STATUS_REJECTED)))
+            ?? $pool(Taxa::query());
+    }
+
+    /**
+     * Descripción con datos reales: párrafo ecológico guardado, resumen de
+     * Wikipedia o, si no hay ninguno, una frase armada con su taxonomía y estatus.
+     */
+    private function describe(Taxa $taxon, array $enriched): string
+    {
+        $ecology = $taxon->ecologyText;
+        if ($ecology?->isVisible() && trim((string) $ecology->text) !== '') {
+            return trim($ecology->text);
+        }
+
+        $wikipedia = trim(strip_tags((string) ($enriched['wikipedia_summary'] ?? '')));
+        if ($wikipedia !== '') {
+            return Str::limit($wikipedia, 600);
+        }
+
+        $name = $taxon->common_name ? "{$taxon->common_name} (<i>{$taxon->scientific_name}</i>)" : "<i>{$taxon->scientific_name}</i>";
+        $lineage = collect([
+            $taxon->order_name ? "del orden {$taxon->order_name}" : null,
+            $taxon->family ? "de la familia {$taxon->family}" : null,
+        ])->filter()->implode(', ');
+        $sentence = trim("{$name} es una especie {$lineage}").'.';
+
+        $status = collect([
+            !empty($enriched['is_endemic']) ? 'es endémica de Colombia' : null,
+            empty($enriched['is_endemic']) && !empty($enriched['is_native']) ? 'es nativa de Colombia' : null,
+            !empty($enriched['is_introduced']) ? 'fue introducida en Colombia' : null,
+        ])->filter()->first();
+        if ($status) {
+            $sentence .= ' '.Str::ucfirst($status).'.';
+        }
+
+        $records = (int) ($taxon->local_records_count ?: $taxon->observation_count);
+        if ($records > 0) {
+            $sentence .= " Cuenta con {$records} ".($records === 1 ? 'registro' : 'registros').' en EcoIses.';
+        }
+
+        return $sentence;
+    }
+
+    /**
+     * Datos cortos para mostrar junto a la descripción.
+     *
+     * @return array<int, array{label: string, value: string}>
+     */
+    private function facts(Taxa $taxon, array $labels): array
+    {
+        $threat = $labels['national'] ?? $labels['global'] ?? null;
+
+        return collect([
+            ['label' => 'Clase', 'value' => $taxon->class],
+            ['label' => 'Familia', 'value' => $taxon->family],
+            ['label' => 'Origen', 'value' => $labels['origin']['label'] ?? null],
+            ['label' => $threat ? "Amenaza ({$threat['scope']})" : 'Amenaza', 'value' => $threat['label'] ?? null],
+        ])->filter(fn ($fact) => !empty($fact['value']))->values()->all();
+    }
 }

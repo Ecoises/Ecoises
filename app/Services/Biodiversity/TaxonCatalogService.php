@@ -4,6 +4,7 @@ namespace App\Services\Biodiversity;
 
 use App\Jobs\EnrichSpeciesJob;
 use App\Models\Observation;
+use App\Models\TaxonApiReference;
 use App\Models\Taxa;
 use App\Services\ExternalApi\GbifService;
 use Illuminate\Support\Collection;
@@ -192,6 +193,41 @@ class TaxonCatalogService
         $hasContent = ! empty($data['gallery']) || ! empty($data['default_photo']) || ! empty($data['wikipedia_summary']);
 
         return $hasTaxonomy && $hasContent;
+    }
+
+    /**
+     * La especie tiene foto principal pero no galería, y no se ha revisado en
+     * iNaturalist en el último mes (algunas de verdad no tienen más fotos).
+     */
+    public function needsGallery(Taxa $taxon): bool
+    {
+        $reference = $taxon->apiReferences->firstWhere('api_source', 'inaturalist');
+        $data = $reference?->data ?? [];
+
+        if (! $reference || ! empty($data['gallery']) || ! ($reference->external_id ?: $taxon->inat_taxon_id)) {
+            return false;
+        }
+
+        $checkedAt = $data['gallery_checked_at'] ?? null;
+
+        return ! $checkedAt || now()->subMonth()->gt($checkedAt);
+    }
+
+    /**
+     * Pide la ficha completa a iNaturalist (trae la galería) y anota la revisión,
+     * haya o no fotos nuevas, para no volver a pedirla en un mes.
+     */
+    public function fetchGallery(Taxa $taxon): void
+    {
+        $reference = $taxon->apiReferences->firstWhere('api_source', 'inaturalist');
+        $externalId = (string) ($reference?->external_id ?: $taxon->inat_taxon_id);
+
+        $this->sync->enrichFromINaturalistId($externalId);
+
+        $fresh = TaxonApiReference::where('taxon_id', $taxon->id)->where('api_source', 'inaturalist')->first();
+        if ($fresh) {
+            $fresh->update(['data' => array_merge($fresh->data ?? [], ['gallery_checked_at' => now()->toIso8601String()])]);
+        }
     }
 
     private function queueEnrichment(Collection $taxa): void

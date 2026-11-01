@@ -41,6 +41,7 @@ class ExplorerService
         protected GbifService $gbif,
         protected INaturalistService $inat,
         protected ConservationLabelService $labels,
+        protected GroupPhotoService $groupPhotos,
     ) {}
 
     /**
@@ -358,6 +359,8 @@ class ExplorerService
                 'url' => $photo['medium_url'] ?? $photo['url'] ?? null,
                 'attribution' => $photo['attribution'] ?? null,
             ] : null,
+            'genus' => str_contains($taxon['scientific_name'], ' ') ? strtok($taxon['scientific_name'], ' ') : null,
+            'family' => null,
             'is_native' => $native,
             'is_endemic' => $endemic,
             'is_introduced' => $taxon['introduced'] && ! $native,
@@ -380,6 +383,8 @@ class ExplorerService
             'scientific_name' => $taxon->scientific_name,
             'common_name' => $taxon->common_name,
             'default_photo' => $url ? ['url' => $url, 'attribution' => $photo['attribution'] ?? null] : null,
+            'genus' => $taxon->genus ?: (str_contains($taxon->scientific_name, ' ') ? strtok($taxon->scientific_name, ' ') : null),
+            'family' => $taxon->family,
             'is_native' => (bool) ($data['is_native'] ?? false),
             'is_endemic' => (bool) ($data['is_endemic'] ?? false),
             'is_introduced' => (bool) ($data['is_introduced'] ?? false),
@@ -396,6 +401,9 @@ class ExplorerService
      */
     private function applyOfficialLabels(array $cards): array
     {
+        // Sin foto propia: la de su género o, si no hay, la de su familia.
+        $cards = $this->groupPhotos->fillCards($cards);
+
         $taxa = Taxa::whereIn('id', array_column($cards, 'id'))
             ->get(['id', 'scientific_name', 'gbif_taxon_key', 'iucn_category', 'iucn_taxon_id', 'is_native', 'is_endemic', 'is_introduced']);
         $labels = $this->labels->labelsForMany($taxa);

@@ -729,7 +729,7 @@ class INaturalistService extends BaseApiService
             'listed_taxa_count' => $taxonData['listed_taxa_count'] ?? count($taxonData['listed_taxa'] ?? []),
             
             'wikipedia_url' => $taxonData['wikipedia_url'] ?? null,
-            'wikipedia_summary' => $taxonData['wikipedia_summary'] ?? null,
+            'wikipedia_summary' => $this->cleanSummary($taxonData['wikipedia_summary'] ?? null),
             'default_photo' => $this->extractPhotoData($taxonData['default_photo'] ?? null),
             
             // OPTIMIZACIÓN: Eliminados taxon_schemes, taxon_changes, etc.
@@ -941,6 +941,26 @@ class INaturalistService extends BaseApiService
      * @param array $taxonPhotos
      * @return array
      */
+    /**
+     * Resumen de Wikipedia sin restos técnicos: a veces llega escapado
+     * (&lt;p&gt;…) o con comentarios de la caché de Wikipedia (<!-- … -->).
+     * Si no queda texto legible, devuelve null.
+     */
+    protected function cleanSummary(?string $summary): ?string
+    {
+        if (!$summary) {
+            return null;
+        }
+
+        if (str_contains($summary, '&lt;') && !preg_match('/<[a-z]/i', $summary)) {
+            $summary = html_entity_decode($summary, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+
+        $summary = trim(preg_replace('/<!--.*?-->/s', '', $summary));
+
+        return trim(strip_tags($summary)) === '' ? null : $summary;
+    }
+
     protected function extractGallery(array $taxonPhotos): array
     {
         if (empty($taxonPhotos)) {
