@@ -10,6 +10,10 @@ class UserChart extends ChartWidget
 
     protected static ?int $sort = 3;
 
+    protected ?string $description = 'Nuevas cuentas por mes.';
+
+    protected ?string $maxHeight = '260px';
+
     public static function canView(): bool
     {
         return auth()->user()?->can('View:SuperAdminDashboard') ?? false;
@@ -38,9 +42,19 @@ class UserChart extends ChartWidget
                 [
                     'label' => 'Usuarios Registrados',
                     'data' => $dataset,
+                    'fill' => true,
+                    'tension' => 0.35,
                 ],
             ],
-            'labels' => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+            'labels' => ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+        ];
+    }
+
+    protected function getOptions(): array
+    {
+        return [
+            'plugins' => ['legend' => ['display' => false]],
+            'scales' => ['y' => ['beginAtZero' => true, 'suggestedMax' => 5, 'ticks' => ['precision' => 0]]],
         ];
     }
 

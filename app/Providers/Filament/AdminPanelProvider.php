@@ -77,9 +77,18 @@ class AdminPanelProvider extends PanelProvider
                 // AccountWidget::class,
                 // FilamentInfoWidget::class,
             ])
+            ->navigationGroups([
+                'Gestión de Contenido',
+                'Biodiversidad',
+                'Gamificación',
+                'Moderación',
+                'Administración',
+            ])
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->plugins([
-                FilamentShieldPlugin::make(),
+                FilamentShieldPlugin::make()
+                    ->navigationGroup('Administración')
+                    ->navigationSort(2),
                 AuthUIEnhancerPlugin::make()
                     ->showEmptyPanelOnMobile(false)
                     ->emptyPanelBackgroundImageOpacity('80%')

@@ -12,6 +12,10 @@ class CreatedContents extends ChartWidget
 
     protected static ?int $sort = 2;
 
+    protected ?string $description = 'Contenidos educativos creados por mes.';
+
+    protected ?string $maxHeight = '260px';
+
     public static function canView(): bool
     {
         $user = auth()->user();
@@ -44,9 +48,19 @@ class CreatedContents extends ChartWidget
                 [
                     'label' => 'Contenidos Creados',
                     'data' => $dataset,
+                    'fill' => true,
+                    'tension' => 0.35,
                 ],
             ],
-            'labels' => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+            'labels' => ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+        ];
+    }
+
+    protected function getOptions(): array
+    {
+        return [
+            'plugins' => ['legend' => ['display' => false]],
+            'scales' => ['y' => ['beginAtZero' => true, 'suggestedMax' => 5, 'ticks' => ['precision' => 0]]],
         ];
     }
 
