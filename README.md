@@ -16,22 +16,34 @@ php artisan storage:link
 
 Laragon sirve el proyecto en `http://biodiversidad-api.test` (API en `/api`, panel en `/admin`).
 
-### El worker de colas (obligatorio)
+### Arranque en desarrollo (obligatorio)
 
-El enriquecimiento de especies (fotos, taxonomía y ecología de GBIF, iNaturalist y EOL) se hace en
-segundo plano en la cola `species-sync`. Sin un worker escuchando **las dos colas**, las especies nuevas se
-quedan sin foto y las tareas se acumulan:
+Todo el trabajo lento (fotos, taxonomía, ecología de GBIF, iNaturalist, EOL y GloBI, y los textos con IA)
+corre en segundo plano. La forma recomendada de levantar todo junto es:
 
 ```bash
-composer queue
-# equivale a: php artisan queue:work --queue=default,species-sync --tries=3 --timeout=120
+composer dev
+# servidor, worker de colas, logs, Reverb y programador de tareas (schedule:work) en una sola consola
 ```
 
-En Laragon puedes dejarlo siempre encendido con *Menú › Procfile* añadiendo:
+El worker atiende las colas en orden de prioridad:
 
-```
-ecoises-queue: php C:/laragon/www/biodiversidad-api/artisan queue:work --queue=default,species-sync --tries=3
-```
+| Cola | Qué lleva |
+|---|---|
+| `interactive` | Lo que pide una persona al abrir una ficha (EOL, GloBI y su texto ecológico) |
+| `default` | Notificaciones y tareas generales |
+| `species-sync` | Especies nuevas que trae el explorador |
+| `ecology-batch` | Precálculo de textos ecológicos por lotes |
+
+El programador de tareas (`schedule:work`) encola cada 10 minutos un lote pequeño de textos ecológicos
+(`ecology:groups` para géneros y familias, `ecology:generate` para especies) y 20 galerías de fotos
+(`species:fill-galleries`). Si apagas el servidor, el
+precálculo se pausa y sigue donde quedó la próxima vez. Cada lote tiene su propio tope diario
+(`GEMINI_ECOLOGY_BATCH_DAILY_LIMIT`, 300 por defecto), aparte del de las fichas abiertas
+(`GEMINI_ECOLOGY_DAILY_LIMIT`, 500).
+
+Solo el worker, sin lo demás: `composer queue`. En el Procfile de Laragon, la entrada
+`EcoIses cola` usa `scripts/laragon-queue.cmd`, que escucha las mismas colas.
 
 ### Velocidad en local
 
