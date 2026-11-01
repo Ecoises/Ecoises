@@ -43,6 +43,8 @@ return [
         'gemini_key' => env('GOOGLE_AI_STUDIO_KEY'),
         'ecology_model' => env('GEMINI_ECOLOGY_MODEL', 'gemini-flash-lite-latest'),
         'ecology_daily_limit' => (int) env('GEMINI_ECOLOGY_DAILY_LIMIT', 500),
+        // Cupo aparte para el precálculo por lotes (no consume el de las fichas abiertas).
+        'ecology_batch_daily_limit' => (int) env('GEMINI_ECOLOGY_BATCH_DAILY_LIMIT', 300),
     ],
     'inaturalist' => [
         'base_url' => env('INATURALIST_BASE_URL', 'https://api.inaturalist.org/v1'),

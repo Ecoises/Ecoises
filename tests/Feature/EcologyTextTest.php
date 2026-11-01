@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\GroupEcologyText;
 use App\Models\SpeciesEcologyText;
 use App\Models\Taxa;
 use App\Services\Biodiversity\EcologicalImportanceService;
@@ -33,6 +34,7 @@ class EcologyTextTest extends TestCase
             $table->boolean('is_endemic')->nullable();
             $table->boolean('is_introduced')->nullable();
             $table->string('conservation_status')->nullable();
+            $table->integer('observation_count')->default(0);
             $table->timestamps();
         });
 
@@ -60,6 +62,21 @@ class EcologyTextTest extends TestCase
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamp('generated_at')->nullable();
             $table->timestamps();
+        });
+
+        Schema::create('group_ecology_texts', function (Blueprint $table): void {
+            $table->id();
+            $table->string('rank');
+            $table->string('name');
+            $table->text('text');
+            $table->json('sources')->nullable();
+            $table->string('model')->nullable();
+            $table->string('status')->default('published');
+            $table->foreignId('reviewed_by')->nullable();
+            $table->timestamp('reviewed_at')->nullable();
+            $table->timestamp('generated_at')->nullable();
+            $table->timestamps();
+            $table->unique(['rank', 'name']);
         });
     }
 
@@ -123,5 +140,45 @@ class EcologyTextTest extends TestCase
 
         $this->assertNull(app(EcologyTextService::class)->textFor($taxon));
         $this->assertFalse(app(EcologyTextService::class)->needsText($taxon));
+    }
+
+    public function test_a_species_without_text_falls_back_to_its_genus_then_its_family(): void
+    {
+        $frog = Taxa::create(['scientific_name' => 'Pristimantis rarus', 'genus' => 'Pristimantis', 'family' => 'Strabomantidae']);
+        $texts = app(EcologyTextService::class);
+
+        $this->assertNull($texts->groupTextFor($frog));
+
+        GroupEcologyText::create(['rank' => 'family', 'name' => 'Strabomantidae', 'text' => 'Texto de la familia']);
+        $this->assertSame('family', $texts->groupTextFor($frog)->rank);
+
+        GroupEcologyText::create(['rank' => 'genus', 'name' => 'Pristimantis', 'text' => 'Texto del género']);
+        $this->assertSame('genus', $texts->groupTextFor($frog)->rank);
+    }
+
+    public function test_a_group_text_is_generated_from_its_species_and_uses_the_batch_quota(): void
+    {
+        config(['services.google.ecology_batch_daily_limit' => 1]);
+        Taxa::create(['scientific_name' => 'Ramphocelus carbo', 'common_name' => 'Fueguero oscuro', 'kingdom' => 'Animalia', 'class' => 'Aves', 'family' => 'Thraupidae', 'genus' => 'Ramphocelus']);
+        Taxa::create(['scientific_name' => 'Tangara gyrola', 'class' => 'Aves', 'family' => 'Thraupidae', 'genus' => 'Tangara']);
+
+        Http::fake([
+            'generativelanguage.googleapis.com/*' => Http::response(['candidates' => [['content' => ['parts' => [['text' => 'Las especies de esta familia dispersan semillas.']]]]]]),
+            '*' => Http::response(['data' => []]),
+        ]);
+
+        $texts = app(EcologyTextService::class);
+        // El cupo interactivo (1) se gasta sin tocar el de lotes.
+        $this->assertTrue($texts->reserveDailySlot());
+        $this->assertTrue($texts->reserveDailySlot(EcologyTextService::POOL_BATCH));
+        $this->assertFalse($texts->reserveDailySlot(EcologyTextService::POOL_BATCH));
+
+        $generated = $texts->generateGroup('family', 'Thraupidae');
+
+        $this->assertSame('Las especies de esta familia dispersan semillas.', $generated->text);
+        $this->assertFalse($texts->needsGroupText('family', 'Thraupidae'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'generativelanguage')
+            && str_contains($request['contents'][0]['parts'][0]['text'], 'la familia Thraupidae')
+            && str_contains($request['contents'][0]['parts'][0]['text'], 'Fueguero oscuro (Ramphocelus carbo)'));
     }
 }

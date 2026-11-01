@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Taxa;
 use App\Models\TaxonApiReference;
+use App\Services\Biodiversity\EcologyTranslationService;
 use App\Services\ExternalApi\EolService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -32,7 +33,7 @@ class EnrichSpeciesEcologyJob implements ShouldQueue, ShouldBeUnique
         return (string) $this->taxonId;
     }
 
-    public function handle(EolService $eol): void
+    public function handle(EolService $eol, EcologyTranslationService $translator): void
     {
         $taxon = Taxa::find($this->taxonId);
 
@@ -51,7 +52,8 @@ class EnrichSpeciesEcologyJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        $profile = $result['data'];
+        // Los textos en inglés u otros idiomas se guardan ya traducidos al español.
+        $profile = $translator->translateProfile($result['data']);
 
         TaxonApiReference::updateOrCreate(
             [

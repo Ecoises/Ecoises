@@ -30,7 +30,7 @@ class GenerateEcologyTextJob implements ShouldBeUnique, ShouldQueue
 
     public $uniqueFor = 3600;
 
-    public function __construct(public int $taxonId)
+    public function __construct(public int $taxonId, public string $pool = EcologyTextService::POOL_INTERACTIVE)
     {
         $this->onQueue('species-sync');
     }
@@ -60,7 +60,7 @@ class GenerateEcologyTextJob implements ShouldBeUnique, ShouldQueue
             $taxon->load('apiReferences');
         }
 
-        if ($texts->reserveDailySlot()) {
+        if ($texts->reserveDailySlot($this->pool)) {
             $texts->generate($taxon);
         }
     }

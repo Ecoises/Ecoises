@@ -196,6 +196,21 @@ class EcologicalImportanceService
         return null;
     }
 
+    /**
+     * Interacciones de un género o una familia completos (para su texto de grupo).
+     * Consulta GloBI si el grupo no está en caché.
+     */
+    public function presentGroup(string $rank, string $name): ?array
+    {
+        $group = $this->syncGroup($rank, $name);
+        $storedRoles = $this->qualifyingRoles($group['roles'] ?? []);
+        if ($storedRoles === []) {
+            return null;
+        }
+
+        return $this->presentRoles(new Taxa, $storedRoles, ['scope' => $rank, 'name' => $name, 'data' => $group, 'url' => $group['url'], 'synced_at' => $group['synced_at'] ?? null]);
+    }
+
     private function presentRoles(Taxa $taxon, array $storedRoles, array $candidate): array
     {
         $localTaxa = $this->localTaxaFor($storedRoles);

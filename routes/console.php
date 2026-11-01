@@ -33,11 +33,24 @@ Schedule::command('species:sync-stale')
 // Listas nacionales del explorador listas antes de que llegue la primera persona del día.
 Schedule::command('explorer:warm')->dailyAt('03:00')->withoutOverlapping();
 
-// Textos de importancia ecológica para las especies más vistas que aún no lo tienen.
-Schedule::command('ecology:generate --limit=200')->dailyAt('03:30')->withoutOverlapping();
+// Precálculo de textos ecológicos por lotes pequeños mientras el servidor está
+// encendido (en local lo corre `php artisan schedule:work`, incluido en `composer dev`).
+// Primero los de género y familia, que cubren a muchas especies de una vez.
+Schedule::command('ecology:groups --limit=10')->everyTenMinutes()->withoutOverlapping();
+Schedule::command('ecology:generate --limit=10')->everyTenMinutes()->withoutOverlapping();
+
+// Galerías de fotos de las especies que solo tienen la foto principal, por lotes.
+Schedule::command('species:fill-galleries --limit=20')->everyTenMinutes()->withoutOverlapping();
 
 // Taxonomía de las especies nuevas desde GBIF (Backbone Taxonomy).
 Schedule::command('taxonomy:sync-gbif')->weeklyOn(0, '04:00')->withoutOverlapping();
 
 // Listas oficiales de Colombia (Res. 0126/2024, endémicas, GRIIS) y UICN, una vez al mes.
 Schedule::command('checklists:sync')->monthlyOn(1, '04:30')->withoutOverlapping();
+
+// Notificaciones de la campana ya leídas con más de 90 días.
+Schedule::call(fn () => \Illuminate\Notifications\DatabaseNotification::query()
+    ->where('type', 'like', 'eco.%')
+    ->whereNotNull('read_at')
+    ->where('created_at', '<', now()->subDays(90))
+    ->delete())->name('notifications:prune')->dailyAt('05:00');
