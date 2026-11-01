@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Jobs\SendCommunityNotification;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -43,6 +44,18 @@ class Challenge extends Model
         'target_value' => 'integer',
         'reward_points' => 'integer',
     ];
+
+    protected static function booted(): void
+    {
+        // Aviso en la campana al activarse un reto (desde el panel; no desde seeders o comandos).
+        static::saved(function (Challenge $challenge): void {
+            if ($challenge->is_active
+                && ($challenge->wasRecentlyCreated || $challenge->wasChanged('is_active'))
+                && (! app()->runningInConsole() || app()->runningUnitTests())) {
+                SendCommunityNotification::schedule($challenge);
+            }
+        });
+    }
 
     public function taxon(): BelongsTo
     {

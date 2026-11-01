@@ -11,12 +11,17 @@ use App\Models\UserActivityAttempt;
 use App\Models\UserArticleProgress;
 use App\Models\UserContentEnrollment;
 use App\Models\UserLessonProgress;
+use App\Notifications\AchievementUnlockedNotification;
+use App\Services\Notifications\UserNotifier;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class AchievementService
 {
-    public function __construct(private readonly GamificationService $gamificationService) {}
+    public function __construct(
+        private readonly GamificationService $gamificationService,
+        private readonly UserNotifier $notifier,
+    ) {}
 
     /** @return Collection<int, UserAchievement> */
     public function evaluate(User $user): Collection
@@ -54,6 +59,10 @@ class AchievementService
                 ['user_id' => $user->id, 'achievement_id' => $achievement->id],
                 ['earned_at' => now(), 'progress_data' => $progressData],
             );
+
+            if ($award->wasRecentlyCreated) {
+                $this->notifier->send($user, new AchievementUnlockedNotification($achievement));
+            }
 
             if ($award->wasRecentlyCreated && $achievement->points > 0) {
                 $this->gamificationService->awardPoints(

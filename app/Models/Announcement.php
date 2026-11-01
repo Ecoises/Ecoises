@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Jobs\SendCommunityNotification;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -48,6 +49,15 @@ class Announcement extends Model
 
             if ($announcement->status !== self::STATUS_PUBLISHED) {
                 $announcement->published_at = null;
+            }
+        });
+
+        // Aviso en la campana al publicarse (desde el panel; no desde seeders o comandos).
+        static::saved(function (Announcement $announcement): void {
+            if ($announcement->status === self::STATUS_PUBLISHED
+                && ($announcement->wasRecentlyCreated || $announcement->wasChanged('status'))
+                && (! app()->runningInConsole() || app()->runningUnitTests())) {
+                SendCommunityNotification::schedule($announcement);
             }
         });
     }

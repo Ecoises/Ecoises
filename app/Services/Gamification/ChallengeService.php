@@ -6,6 +6,9 @@ use App\Models\Challenge;
 use App\Models\ChallengeParticipation;
 use App\Models\Observation;
 use App\Models\User;
+use App\Notifications\ChallengeCompletedNotification;
+use App\Notifications\ChallengeEvidenceReviewedNotification;
+use App\Services\Notifications\UserNotifier;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -27,6 +30,7 @@ class ChallengeService
     public function __construct(
         private readonly GamificationService $gamification,
         private readonly AchievementService $achievements,
+        private readonly UserNotifier $notifier,
     ) {}
 
     /**
@@ -77,6 +81,7 @@ class ChallengeService
                 'reviewed_at' => now(),
                 'review_note' => $note,
             ]);
+            $this->notifier->send($observation->user, new ChallengeEvidenceReviewedNotification($observation));
 
             return $this->syncProgress($observation->user, $observation->challenge);
         });
@@ -94,6 +99,7 @@ class ChallengeService
                 'reviewed_at' => now(),
                 'review_note' => null,
             ]);
+            $this->notifier->send($observation->user, new ChallengeEvidenceReviewedNotification($observation));
 
             return $this->syncProgress($observation->user, $observation->challenge);
         });
@@ -145,6 +151,7 @@ class ChallengeService
             $challenge->id,
             "Reto completado: {$challenge->title}",
         );
+        $this->notifier->send($user, new ChallengeCompletedNotification($challenge));
 
         if ($challenge->rewardBadge) {
             $this->achievements->award($user, $challenge->rewardBadge, ['challenge_id' => $challenge->id]);

@@ -5,11 +5,15 @@ namespace App\Services\Gamification;
 use App\Models\Level;
 use App\Models\PointTransaction;
 use App\Models\User;
+use App\Notifications\LevelUpNotification;
+use App\Services\Notifications\UserNotifier;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class GamificationService
 {
+    public function __construct(private readonly UserNotifier $notifier) {}
+
     /**
      * Otorga puntos a un usuario de manera segura (idempotente).
      *
@@ -93,9 +97,13 @@ class GamificationService
         if ($appropriateLevel && $appropriateLevel->id !== (int) $user->level) {
             $oldLevel = $user->level;
             $user->update(['level' => $appropriateLevel->id]);
-
-            // Aquí se podría disparar un evento LevelUp event
             Log::info("User {$user->id} leveled up from {$oldLevel} to {$appropriateLevel->name}");
+
+            // Solo se avisa al subir: al revertir puntos el nivel también puede bajar.
+            $previousMinPoints = (int) ($oldLevel ? Level::find($oldLevel)?->min_points : 0);
+            if ($appropriateLevel->min_points > $previousMinPoints) {
+                $this->notifier->send($user, new LevelUpNotification($appropriateLevel));
+            }
         }
     }
 }

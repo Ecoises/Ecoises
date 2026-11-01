@@ -12,12 +12,14 @@ use App\Http\Controllers\Api\ActivityController;
 use App\Http\Controllers\Api\AnnouncementController;
 use App\Http\Controllers\Api\CertificateController;
 use App\Http\Controllers\Api\ChallengeController;
+use App\Http\Controllers\Api\AuthImageController;
 use App\Http\Controllers\Api\DailySpeciesController;
 use App\Http\Controllers\Api\EducationalContentController;
 use App\Http\Controllers\Api\ExplorerController;
 use App\Http\Controllers\Api\FeedbackController;
 use App\Http\Controllers\Api\LearningDashboardController;
 use App\Http\Controllers\Api\LessonController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\ObservationController;
 use App\Http\Controllers\Api\TaxonController;
 use App\Http\Controllers\Auth\AuthController;
@@ -49,6 +51,9 @@ Route::prefix('taxa')->group(function () {
 // Curiosidades y especie del día
 Route::get('/daily-curiosities', [DailySpeciesController::class, 'index']);
 Route::get('/daily-recommendation', [DailySpeciesController::class, 'speciesOfTheDay']);
+
+// Foto de las pantallas de acceso (iNaturalist, todo el mundo, alta resolución)
+Route::get('/auth-image', [AuthImageController::class, 'show']);
 
 // ── Retos de campo y avistamientos ──────────────────────────────────────────
 Route::get('/challenges', [ChallengeController::class, 'index']);
@@ -88,4 +93,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Opiniones
     Route::post('/educational-contents/{id}/feedback', [FeedbackController::class, 'storeContent']);
     Route::post('/feedback', [FeedbackController::class, 'storeGeneral']);
+
+    // Notificaciones (campana)
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::patch('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
 });

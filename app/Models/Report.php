@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Notifications\ReportClosedNotification;
+use App\Services\Notifications\UserNotifier;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -81,6 +83,16 @@ class Report extends Model
             } else {
                 $report->resolved_at = null;
                 $report->resolved_by = null;
+            }
+        });
+
+        // Avisa a quien reportó cuando el caso se cierra.
+        static::updated(function (Report $report): void {
+            if ($report->wasChanged('status')
+                && in_array($report->status, [self::STATUS_RESOLVED, self::STATUS_DISMISSED], true)
+                && $report->user_id
+                && $report->user_id !== $report->resolved_by) {
+                app(UserNotifier::class)->send($report->user, new ReportClosedNotification($report));
             }
         });
     }

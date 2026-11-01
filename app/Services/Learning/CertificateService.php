@@ -4,11 +4,15 @@ namespace App\Services\Learning;
 
 use App\Models\UserCertificate;
 use App\Models\UserContentEnrollment;
+use App\Notifications\CertificateIssuedNotification;
+use App\Services\Notifications\UserNotifier;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class CertificateService
 {
+    public function __construct(private readonly UserNotifier $notifier) {}
+
     public function issueFor(UserContentEnrollment $enrollment): ?UserCertificate
     {
         if (! Schema::hasTable('user_certificates')
@@ -18,7 +22,7 @@ class CertificateService
             return null;
         }
 
-        return UserCertificate::firstOrCreate(
+        $certificate = UserCertificate::firstOrCreate(
             [
                 'user_id' => $enrollment->user_id,
                 'content_id' => $enrollment->content_id,
@@ -30,5 +34,11 @@ class CertificateService
                 'issued_at' => now(),
             ],
         );
+
+        if ($certificate->wasRecentlyCreated) {
+            $this->notifier->send($enrollment->user, new CertificateIssuedNotification($certificate));
+        }
+
+        return $certificate;
     }
 }
