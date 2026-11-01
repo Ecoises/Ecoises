@@ -30,8 +30,15 @@ class GenerateEcologyTextJob implements ShouldBeUnique, ShouldQueue
 
     public $uniqueFor = 3600;
 
-    public function __construct(public int $taxonId, public string $pool = EcologyTextService::POOL_INTERACTIVE)
-    {
+    /**
+     * Con $regenerate se redacta aunque ya exista texto; el anterior se
+     * reemplaza solo si el nuevo se genera bien.
+     */
+    public function __construct(
+        public int $taxonId,
+        public string $pool = EcologyTextService::POOL_INTERACTIVE,
+        public bool $regenerate = false,
+    ) {
         $this->onQueue('species-sync');
     }
 
@@ -43,7 +50,7 @@ class GenerateEcologyTextJob implements ShouldBeUnique, ShouldQueue
     public function handle(EcologyTextService $texts, EcologicalImportanceService $ecology, TaxonSyncService $sync): void
     {
         $taxon = Taxa::with('apiReferences')->find($this->taxonId);
-        if (! $taxon || ! $texts->needsText($taxon)) {
+        if (! $taxon || (! $this->regenerate && ! $texts->needsText($taxon))) {
             return;
         }
 

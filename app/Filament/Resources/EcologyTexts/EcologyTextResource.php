@@ -121,10 +121,9 @@ class EcologyTextResource extends Resource
                     ->label('Redactar de nuevo')
                     ->icon(Heroicon::OutlinedArrowPath)
                     ->requiresConfirmation()
+                    ->modalDescription('El texto actual se mantiene hasta que el nuevo esté listo.')
                     ->action(function (SpeciesEcologyText $record): void {
-                        $taxonId = $record->taxon_id;
-                        $record->delete();
-                        GenerateEcologyTextJob::dispatch($taxonId);
+                        GenerateEcologyTextJob::dispatch($record->taxon_id, regenerate: true);
                         Notification::make()->title('Se redactará de nuevo en unos segundos')->success()->send();
                     }),
                 EditAction::make(),

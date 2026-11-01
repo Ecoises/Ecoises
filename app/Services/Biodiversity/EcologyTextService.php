@@ -207,6 +207,8 @@ class EcologyTextService
                 'sources' => $facts['sources'],
                 'model' => $result['model'],
                 'status' => SpeciesEcologyText::STATUS_PUBLISHED,
+                'reviewed_by' => null,
+                'reviewed_at' => null,
                 'generated_at' => now(),
             ]
         );

@@ -13,9 +13,4 @@ class CreateUser extends CreateRecord
     {
         return $this->getResource()::getUrl('index');
     }
-
-    protected function afterSave(): void
-    {
-        $this->redirect($this->getRedirectUrl());
-    }
 }

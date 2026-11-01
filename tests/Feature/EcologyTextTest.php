@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GenerateEcologyTextJob;
 use App\Models\GroupEcologyText;
 use App\Models\SpeciesEcologyText;
 use App\Models\Taxa;
@@ -131,6 +132,39 @@ class EcologyTextTest extends TestCase
         // Tope diario de 1: la segunda especie espera al día siguiente.
         $this->assertFalse($texts->reserveDailySlot());
         $this->assertTrue($texts->needsText($other));
+    }
+
+    public function test_redrafting_keeps_the_current_text_until_the_new_one_is_ready(): void
+    {
+        $bird = Taxa::create(['scientific_name' => 'Ramphocelus carbo', 'class' => 'Aves', 'family' => 'Thraupidae', 'genus' => 'Ramphocelus', 'is_native' => true]);
+        SpeciesEcologyText::create([
+            'taxon_id' => $bird->id,
+            'text' => 'Texto revisado.',
+            'status' => SpeciesEcologyText::STATUS_REVIEWED,
+            'reviewed_by' => 1,
+            'reviewed_at' => now(),
+        ]);
+        config(['services.google.ecology_daily_limit' => 5]);
+        $redraft = fn () => app()->call([new GenerateEcologyTextJob($bird->id, regenerate: true), 'handle']);
+
+        // Primer intento: la IA falla. Segundo: responde.
+        Http::fake([
+            'generativelanguage.googleapis.com/*' => Http::sequence()
+                ->push([], 500)
+                ->push(['candidates' => [['content' => ['parts' => [['text' => 'Texto nuevo.']]]]]]),
+            '*' => Http::response(['data' => []]),
+        ]);
+
+        // La IA falla: el texto anterior sigue intacto.
+        $redraft();
+        $this->assertSame('Texto revisado.', SpeciesEcologyText::where('taxon_id', $bird->id)->value('text'));
+
+        // La IA responde: se reemplaza y vuelve a quedar sin revisar.
+        $redraft();
+        $text = SpeciesEcologyText::where('taxon_id', $bird->id)->first();
+        $this->assertSame('Texto nuevo.', $text->text);
+        $this->assertSame(SpeciesEcologyText::STATUS_PUBLISHED, $text->status);
+        $this->assertNull($text->reviewed_by);
     }
 
     public function test_a_hidden_text_is_not_shown(): void

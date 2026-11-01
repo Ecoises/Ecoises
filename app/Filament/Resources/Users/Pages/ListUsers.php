@@ -31,9 +31,10 @@ class ListUsers extends ListRecords
                 })),
             'users' => Tab::make('Usuarios')
                 ->icon('heroicon-m-user')
-                ->modifyQueryUsing(fn (Builder $query) => $query->whereHas('roles', function ($query) {
-                    $query->where('name', 'panel_user');
-                })->orWhereDoesntHave('roles')),
+                // Agrupado para que el OR no se salga de la búsqueda y los filtros.
+                ->modifyQueryUsing(fn (Builder $query) => $query->where(fn (Builder $query) => $query
+                    ->whereHas('roles', fn ($query) => $query->where('name', 'panel_user'))
+                    ->orWhereDoesntHave('roles'))),
         ];
     }
 }
